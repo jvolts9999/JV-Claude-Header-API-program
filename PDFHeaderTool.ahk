@@ -158,6 +158,63 @@ class Json {
     }
 }
 
+; --- Dates and header text --------------------------------------------
+NormalizeDateMDY(s) {
+    s := Trim(s)
+    if (s = "")
+        return ""
+    if RegExMatch(s, "^(\d{4})-(\d{1,2})-(\d{1,2})$", &m)
+        return HDR_FmtDate(m[2], m[3], m[1])
+    if RegExMatch(s, "^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2}|\d{4})$", &m)
+        return HDR_FmtDate(m[1], m[2], HDR_WindowYear(m[3]))
+    static months := Map("jan",1,"feb",2,"mar",3,"apr",4,"may",5,"jun",6,
+        "jul",7,"aug",8,"sep",9,"oct",10,"nov",11,"dec",12)
+    if RegExMatch(s, "i)^([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?\s*,?\s+(\d{2}|\d{4})$", &m) {
+        key := SubStr(StrLower(m[1]), 1, 3)
+        if months.Has(key)
+            return HDR_FmtDate(months[key], m[2], HDR_WindowYear(m[3]))
+    }
+    return ""
+}
+
+HDR_WindowYear(y) {
+    y := Integer(y)
+    if (y >= 100)
+        return y
+    return (y <= 49) ? 2000 + y : 1900 + y
+}
+
+HDR_FmtDate(mo, d, y) {
+    mo := Integer(mo), d := Integer(d), y := Integer(y)
+    if (mo < 1 || mo > 12 || d < 1 || d > 31 || y < 1900 || y > 2100)
+        return ""
+    return Format("{:02}/{:02}/{:04}", mo, d, y)
+}
+
+BuildHeader(dateRaw, provider, noteType) {
+    sep := " " Chr(0x2014) " "
+    marks := []
+    d := NormalizeDateMDY(dateRaw)
+    if (d = "") {
+        d := "MM/DD/YYYY"
+        marks.Push({start: 1, len: StrLen(d)})
+    }
+    text := d sep
+    p := Trim(provider)
+    if (p = "") {
+        p := "PROVIDER"
+        marks.Push({start: StrLen(text) + 1, len: StrLen(p)})
+    }
+    text .= p sep
+    n := Trim(noteType)
+    if (n = "") {
+        n := "NOTE TYPE"
+        marks.Push({start: StrLen(text) + 1, len: StrLen(n)})
+    }
+    text .= n
+    return {text: text, marks: marks}
+}
+
 ; --- Startup (guarded so tests can #Include this file) ----------------
 Main() {
     ; Filled in by later tasks.
