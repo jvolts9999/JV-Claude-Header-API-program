@@ -14,7 +14,10 @@ cursor. No connection to ChronologySuite — no shared includes, no suite hotkey
 ## The workflow
 
 1. John has a record PDF open in Acrobat Pro and his chronology open in Word.
-2. He presses the hotkey (default **Ctrl+Shift+H**, changeable in settings).
+2. He presses the hotkey (default **F8**, changeable in settings, or "none") — or
+   clicks the tool's small floating button. John is freeing F8 in ChronologySuite's
+   hotkey editor himself, since this tool replaces the suite's old live-headings
+   workflow that owned the key.
 3. The tool asks Acrobat which document and page are on screen.
 4. It extracts that one page into a temporary one-page PDF (deleted afterward).
 5. It sends the page to Claude (model `claude-opus-5`) as a PDF attachment — the
@@ -61,8 +64,13 @@ cursor. No connection to ChronologySuite — no shared includes, no suite hotkey
 1. **Settings** — loads `%APPDATA%\PDFHeaderTool\settings.ini`: API key, hotkey,
    model name, header separator. Creates the file with a blank key slot on first
    run and tells John where it is.
-2. **Hotkey handler** — registers the configured hotkey; guards against
-   double-press while a request is in flight.
+2. **Hotkey handler** — registers the configured hotkey (default F8; a blank
+   setting means no hotkey); guards against double-press while a request is in
+   flight.
+2a. **Floating button** — a tiny always-on-top button window that triggers the
+   same action as the hotkey. Draggable anywhere; its position is remembered
+   between runs; can be hidden via settings (`ShowButton=0`). Greys out while a
+   request is in flight.
 3. **Acrobat reader** — gets the active PDF and current page via COM; extracts the
    single page to a temp file in the user temp folder; cleans up afterward.
 4. **Claude client** — WinHttp POST to `/v1/messages`: base64 one-page PDF as a
