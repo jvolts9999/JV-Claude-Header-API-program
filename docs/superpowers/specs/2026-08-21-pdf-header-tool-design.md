@@ -76,7 +76,9 @@ cursor. No connection to ChronologySuite — no shared includes, no suite hotkey
 4. **Claude client** — WinHttp POST to `/v1/messages`: base64 one-page PDF as a
    document block + a fixed instruction; strict JSON schema
    `{date_of_service, provider_name, note_type}`, each nullable; 60-second
-   timeout; small max_tokens (the reply is a few dozen tokens).
+   timeout. max_tokens is 16000: the visible reply is tiny, but the model's
+   internal reasoning counts against the cap, so a small cap risks truncation
+   (only tokens actually produced are billed).
 5. **Header builder** — normalizes the date to MM/DD/YYYY; swaps nulls for
    placeholder text and remembers which segments need highlighting.
 6. **Word inserter** — inserts the Heading 1 paragraph at the cursor, applies
