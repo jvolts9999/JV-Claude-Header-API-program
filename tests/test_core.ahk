@@ -72,5 +72,46 @@ h := BuildHeader("bad date", "", "MRI")
 AssertEq(SubStr(h.text, h.marks[1].start, h.marks[1].len), "MM/DD/YYYY", "unparseable date becomes placeholder")
 AssertEq(SubStr(h.text, h.marks[2].start, h.marks[2].len), "PROVIDER", "empty provider becomes placeholder")
 
+; ---- BuildRequestBody ----
+body := BuildRequestBody("QUJD", "claude-opus-5")
+req := Json.Parse(body)
+AssertEq(req["model"], "claude-opus-5", "req model")
+AssertEq(req["max_tokens"], 16000, "req max_tokens")
+AssertEq(req["fallbacks"], "default", "req fallbacks")
+AssertEq(req["messages"][1]["content"][1]["type"], "document", "req document block first")
+AssertEq(req["messages"][1]["content"][1]["source"]["media_type"], "application/pdf", "req pdf media type")
+AssertEq(req["messages"][1]["content"][1]["source"]["data"], "QUJD", "req b64 passthrough")
+AssertEq(req["messages"][1]["content"][2]["type"], "text", "req text block second")
+AssertTrue(InStr(req["messages"][1]["content"][2]["text"], "date_of_service") > 0, "req prompt mentions field")
+fmt := req["output_config"]["format"]
+AssertEq(fmt["type"], "json_schema", "req schema type")
+AssertEq(fmt["schema"]["additionalProperties"], false, "req schema closed")
+AssertEq(fmt["schema"]["required"].Length, 3, "req schema requires 3 fields")
+
+; ---- ExtractFields ----
+ok := '{"stop_reason":"end_turn","content":[{"type":"thinking","thinking":""},'
+    . '{"type":"text","text":"{\"date_of_service\":\"2023-03-14\",\"provider_name\":\"John Smith, MD\",\"note_type\":null}"}]}'
+f := ExtractFields(ok)
+AssertEq(f.ok ? 1 : 0, 1, "extract ok")
+AssertEq(f.date, "2023-03-14", "extract date")
+AssertEq(f.provider, "John Smith, MD", "extract provider")
+AssertEq(f.notetype, "", "extract null note type as empty")
+f := ExtractFields('{"stop_reason":"refusal","content":[]}')
+AssertEq(f.ok ? 1 : 0, 0, "refusal not ok")
+f := ExtractFields('{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}')
+AssertEq(f.ok ? 1 : 0, 0, "api error not ok")
+AssertTrue(InStr(f.err, "invalid x-api-key") > 0, "api error message surfaced")
+f := ExtractFields('{"stop_reason":"max_tokens","content":[{"type":"text","text":"{\"date_of"}]}')
+AssertEq(f.ok ? 1 : 0, 0, "max_tokens not ok")
+
+; ---- FileToBase64 ----
+b64path := A_Temp "\pdfheadertool_b64test.bin"
+try FileDelete(b64path)
+bf := FileOpen(b64path, "w", "UTF-8-RAW")  ; RAW: no BOM, or the vector breaks
+bf.Write("Man")
+bf.Close()
+AssertEq(FileToBase64(b64path), "TWFu", "base64 known vector")
+FileDelete(b64path)
+
 FileAppend((TestFails ? "FAILED " TestFails "/" TestCount : "PASSED " TestCount) " tests`n", "*")
 ExitApp(TestFails)

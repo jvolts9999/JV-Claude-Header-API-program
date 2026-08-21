@@ -215,6 +215,86 @@ BuildHeader(dateRaw, provider, noteType) {
     return {text: text, marks: marks}
 }
 
+; --- Claude API --------------------------------------------------------
+BuildRequestBody(b64pdf, model) {
+    static prompt := "This is one page of a medical record. Extract: "
+        . "(1) date_of_service - the date this note, encounter, or study took place; never a print, fax, or signature date. "
+        . "(2) provider_name - the clinician who authored or performed it, with credential if shown, like 'John Smith, MD'. "
+        . "(3) note_type - a short label for the document type, like 'Office Visit', 'Operative Report', 'MRI Lumbar Spine', 'Physical Therapy', 'Discharge Summary', 'ER Visit'. "
+        . "Use null for any field this page does not establish."
+    static schema := '{"type":"object","properties":{'
+        . '"date_of_service":{"type":["string","null"]},'
+        . '"provider_name":{"type":["string","null"]},'
+        . '"note_type":{"type":["string","null"]}},'
+        . '"required":["date_of_service","provider_name","note_type"],'
+        . '"additionalProperties":false}'
+    return '{"model":"' Json.Escape(model) '","max_tokens":16000,"fallbacks":"default",'
+        . '"messages":[{"role":"user","content":['
+        . '{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"' b64pdf '"}},'
+        . '{"type":"text","text":"' Json.Escape(prompt) '"}]}],'
+        . '"output_config":{"format":{"type":"json_schema","schema":' schema '}}}'
+}
+
+ExtractFields(responseText) {
+    try
+        resp := Json.Parse(responseText)
+    catch
+        return {ok: false, err: "Unreadable API response."}
+    if (resp is Map) && resp.Has("error")
+        return {ok: false, err: "API error: " resp["error"]["message"]}
+    if !(resp is Map) || !resp.Has("content")
+        return {ok: false, err: "Unexpected API response shape."}
+    if (resp.Has("stop_reason") && resp["stop_reason"] = "refusal")
+        return {ok: false, err: "The model declined to read this page."}
+    if (resp.Has("stop_reason") && resp["stop_reason"] = "max_tokens")
+        return {ok: false, err: "The response was cut off. Try again."}
+    txt := ""
+    for blk in resp["content"] {
+        if (blk["type"] = "text")
+            txt .= blk["text"]
+    }
+    if (txt = "")
+        return {ok: false, err: "The model returned no text."}
+    try
+        f := Json.Parse(txt)
+    catch
+        return {ok: false, err: "The model reply was not valid JSON."}
+    return {ok: true, date: HDR_Field(f, "date_of_service"),
+        provider: HDR_Field(f, "provider_name"),
+        notetype: HDR_Field(f, "note_type")}
+}
+
+HDR_Field(m, k) {
+    if !(m is Map) || !m.Has(k)
+        return ""
+    v := m[k]
+    return (v is String) ? v : ""
+}
+
+FileToBase64(path) {
+    buf := FileRead(path, "RAW")
+    n := 0
+    ; 0x40000001 = CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF (API forbids newlines)
+    DllCall("crypt32\CryptBinaryToStringW", "ptr", buf, "uint", buf.Size,
+        "uint", 0x40000001, "ptr", 0, "uint*", &n)
+    out := Buffer(n * 2)
+    DllCall("crypt32\CryptBinaryToStringW", "ptr", buf, "uint", buf.Size,
+        "uint", 0x40000001, "ptr", out, "uint*", &n)
+    return StrGet(out, "UTF-16")
+}
+
+CallClaude(body, apiKey, timeoutSec := 60) {
+    req := ComObject("WinHttp.WinHttpRequest.5.1")
+    req.Open("POST", "https://api.anthropic.com/v1/messages", false)
+    req.SetTimeouts(15000, 15000, timeoutSec * 1000, timeoutSec * 1000)
+    req.SetRequestHeader("Content-Type", "application/json")
+    req.SetRequestHeader("x-api-key", apiKey)
+    req.SetRequestHeader("anthropic-version", "2023-06-01")
+    req.SetRequestHeader("anthropic-beta", "server-side-fallback-2026-07-01")
+    req.Send(body)
+    return {status: req.Status, text: req.ResponseText}
+}
+
 ; --- Startup (guarded so tests can #Include this file) ----------------
 Main() {
     ; Filled in by later tasks.
