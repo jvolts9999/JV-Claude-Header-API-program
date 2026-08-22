@@ -1087,3 +1087,185 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 - The request is synchronous: the floating button freezes for the few seconds the API call runs (Acrobat and Word are separate processes and are unaffected). The BUSY flag swallows double-presses — this stands in for the spec's "greys out while in flight" (a repaint during a blocked thread is unreliable anyway). Async is a later improvement if the freeze annoys John.
 - Uses only the page on screen; no multi-page reasoning, no batch mode.
+
+---
+
+# v1.1 addendum (John-approved 2026-08-21): font layer, progress, Settings GUI
+
+Approved design: header keeps Heading 1 STYLE (ChronologySuite compatibility) with direct
+character formatting layered on top (default Times New Roman, 20 pt, black — color fixed);
+non-blocking API call with a progress strip; a Settings window (hotkey capture + "no hotkey",
+model dropdown with strength notes, font name+size, show-button toggle, masked API key,
+Save applies immediately). Global Constraints from v1 still bind.
+
+### Task 9: Header font layer + settings keys
+
+**Files:**
+- Modify: `PDFHeaderTool.ahk` (LoadSettings, InsertHeader, RunInsertCore)
+- Modify: `tests\test_core.ahk`
+- Modify: `tools\word-demo.ahk`
+
+**Interfaces:**
+- Consumes: existing `LoadSettings`, `InsertHeader(hdr)`, `BuildHeader`.
+- Produces: `LoadSettings` result gains `headerFont` (String, default `"Times New Roman"`) and
+  `headerSize` (Integer, default `20`; non-numeric or out of 6-72 falls back to 20 via helper
+  `HDR_ValidSize(v)`). `InsertHeader(hdr, fontName := "", fontSize := 0)` — after applying
+  style `-2`, when `fontName != ""` set `hdrRng.Font.Name := fontName`; when `fontSize > 0`
+  set `hdrRng.Font.Size := fontSize`; always set `hdrRng.Font.Color := 0` (black) when either
+  override is applied. Empty/zero args = v1 behavior (style only).
+
+Steps (TDD): (1) append tests before the summary pair —
+
+```ahk
+; ---- Task 9: header font settings ----
+sPath9 := A_Temp "\pdfheadertool_settings_t9.ini"
+try FileDelete(sPath9)
+cfg9 := LoadSettings(sPath9)
+AssertEq(cfg9.headerFont, "Times New Roman", "font default name")
+AssertEq(cfg9.headerSize, 20, "font default size")
+IniWrite("Georgia", sPath9, "Settings", "HeaderFont")
+IniWrite("26", sPath9, "Settings", "HeaderSize")
+cfg9 := LoadSettings(sPath9)
+AssertEq(cfg9.headerFont, "Georgia", "font reads name")
+AssertEq(cfg9.headerSize, 26, "font reads size")
+IniWrite("huge", sPath9, "Settings", "HeaderSize")
+cfg9 := LoadSettings(sPath9)
+AssertEq(cfg9.headerSize, 20, "font size garbage falls back")
+IniWrite("200", sPath9, "Settings", "HeaderSize")
+cfg9 := LoadSettings(sPath9)
+AssertEq(cfg9.headerSize, 20, "font size out of range falls back")
+FileDelete(sPath9)
+AssertEq(HDR_ValidSize(14), 14, "validsize passthrough")
+AssertEq(HDR_ValidSize(""), 20, "validsize empty")
+```
+
+(2) RED (expect FAIL lines / nonzero exit — all functions exist by then except HDR_ValidSize;
+note: the two HDR_ValidSize assertions reference an undefined function, which HANGS on a
+dialog rather than failing (known harness limitation) — so for the RED run, comment out the
+two HDR_ValidSize lines, observe the cfg9 FAILs, then uncomment before implementing);
+(3) implement: first-run ini template gains `HeaderFont=Times New Roman` and
+`HeaderSize=20` lines; LoadSettings reads both
+(`headerFont: Trim(IniRead(p, "Settings", "HeaderFont", "Times New Roman"))`,
+`headerSize: HDR_ValidSize(Trim(IniRead(p, "Settings", "HeaderSize", "20")))`);
+
+```ahk
+HDR_ValidSize(v) {
+    if (v = "" || !IsInteger(v))
+        return 20
+    v := Integer(v)
+    return (v < 6 || v > 72) ? 20 : v
+}
+```
+
+`InsertHeader` gains the two optional params applied as described (Font.Name / Font.Size /
+Font.Color := 0 on `hdrRng` only — marks keep their yellow highlight, which is independent
+of font color); `RunInsertCore` passes `CFG.headerFont, CFG.headerSize`; `word-demo.ahk`
+passes `"Times New Roman", 20` explicitly on both calls; (4) GREEN `PASSED 82` (74+8),
+exit 0; (5) commit.
+
+### Task 10: Non-blocking API call + progress strip
+
+**Files:**
+- Modify: `PDFHeaderTool.ahk` (CallClaude, RunInsert/RunInsertCore; new PROG_* functions)
+
+**Interfaces:**
+- `CallClaude(body, apiKey, timeoutSec := 60, onTick := "")` — same `{status, text}` result
+  shape, plus `err` on transport failure. Implementation: `req.Open("POST", url, true)`
+  (async), headers as before, `req.Send(body)`, then poll:
+
+```ahk
+    deadline := A_TickCount + timeoutSec * 1000
+    loop {
+        done := false
+        try
+            done := req.WaitForResponse(1)
+        catch
+            done := false   ; 1s chunk elapsed; response not ready yet
+        if done
+            break
+        if (A_TickCount > deadline)
+            return {status: 0, text: "", err: "Timed out after " timeoutSec " seconds."}
+        if (onTick != "")
+            onTick.Call()
+    }
+    return {status: req.Status, text: req.ResponseText}
+```
+
+  Wrap Open/Send in try -> `{status: 0, text: "", err: "Could not reach the API: " e.Message}`.
+  In `RunInsertCore`, before the existing non-200 branch: `if (r.status = 0) { Toast(r.err),
+  return }`.
+- New: `PROG_Show(text)`, `PROG_Set(text, pct)`, `PROG_Hide()` — one small
+  `+AlwaysOnTop -Caption +ToolWindow` Gui near the mouse (Text control w260 + Progress
+  control w260, global PROGGUI/PROGTEXT/PROGBAR handles; PROG_Show creates once and reuses).
+  Stage plan in `RunInsertCore`: `PROG_Show("Reading page...")` before grab ->
+  `PROG_Set("Asking Claude (page " g.pageNum ")...", 10)` before CallClaude, whose onTick
+  closure steps a local pct by +10 capped at 90 (`PROG_Set(sameText, pct)`) ->
+  `PROG_Set("Inserting...", 95)` before InsertHeader -> final Toast unchanged (header text
+  or error). `RunInsert`'s `finally` calls `PROG_Hide()` alongside `BUSY := false` so the
+  strip never outlives a failed run. The two v1 stage Toasts inside RunInsertCore are
+  replaced by the strip; the FINAL Toast stays.
+- No new unit tests (GUI+COM); regression stays green (82). Behavior verified in checkpoint 5.
+
+### Task 11: Settings GUI
+
+**Files:**
+- Modify: `PDFHeaderTool.ahk` (new SETTINGS_* section + tray/button wiring; README update)
+- Modify: `tests\test_core.ahk`
+- Modify: `README.md`
+
+**Interfaces / behavior:**
+- `ModelOptions()` returns a fresh ordered array of `{id, label, note}`:
+  1. id `claude-opus-5`, label `Opus 5 - most accurate`, note `Best on ugly scans and faint faxes. About 2-3 cents per press.`
+  2. id `claude-sonnet-5`, label `Sonnet 5 - balanced`, note `Near-Opus accuracy at about a third of the cost. About 1 cent per press.`
+  3. id `claude-haiku-4-5`, label `Haiku 4.5 - cheapest`, note `Fastest and cheapest; weakest on messy scans. About half a cent per press.`
+  `ModelNoteFor(id)` -> the matching note, `""` if unknown.
+- Unit tests (append before summary pair, 4 assertions):
+
+```ahk
+; ---- Task 11: model options ----
+mo := ModelOptions()
+AssertEq(mo.Length, 3, "model options count")
+AssertEq(mo[1].id, "claude-opus-5", "model options first id")
+AssertTrue(InStr(ModelNoteFor("claude-haiku-4-5"), "cheapest") > 0, "haiku note text")
+AssertEq(ModelNoteFor("claude-nonexistent"), "", "unknown model empty note")
+```
+
+- `ShowSettingsGui()` — single instance (global SETGUI; re-front if open). Controls, in order:
+  Hotkey capture (`AddHotkey`, initialized from `CFG.hotkey` via try) +
+  `AddCheckbox("No hotkey")` checked when `CFG.hotkey = ""` (checking disables the capture
+  box);
+  model `AddDropDownList` of the three labels (Choose = index of `CFG.model` in ModelOptions
+  by id; a `CFG.model` not in the list gets a 4th entry `Custom: <value>` and Choose 4), with
+  a wrapping Text control (w300 r3) showing `ModelNoteFor` of the selection, updated on the
+  DDL's Change event (Custom entry shows `Custom model string from settings file.`);
+  font `AddComboBox` prefilled `["Times New Roman","Calibri","Cambria","Georgia","Arial","Book Antiqua"]`,
+  editable, initialized to `CFG.headerFont` (add it to the list if not present) + size
+  `AddEdit +Number w60` with `AddUpDown Range6-72` initialized to `CFG.headerSize`;
+  `AddCheckbox("Show floating button")` = `CFG.showButton`;
+  API key `AddEdit +Password w300` prefilled `CFG.apiKey`;
+  Save + Cancel buttons.
+- Save logic: newHotkey = `""` if No-hotkey checked, else the capture value if non-empty,
+  else keep `CFG.hotkey` (blank capture box does NOT clear a stored custom combo). Apply
+  live: `try Hotkey(CFG.hotkey, "Off")` when old non-empty; then for new non-empty
+  `try Hotkey(newHotkey, RunInsert, "On")` — on catch MsgBox "not a usable hotkey", restore
+  old registration, keep window open, skip save. Model = id of the selected entry (Custom
+  keeps its stored value). Font name from combo text; size through `HDR_ValidSize`. API key
+  written as-is (clearing the field clears the key). Show-button: checked -> `MakeButton()`
+  if `BTNGUI = ""` else `BTNGUI.Show("NoActivate")`; unchecked -> `BTNGUI.Hide()` if present.
+  Persist ALL of: Hotkey, Model, HeaderFont, HeaderSize, ShowButton, ApiKey via IniWrite to
+  `CFG.path`; update the CFG global fields in place; destroy window on successful save.
+- Entry points: tray gains `Settings` as the FIRST item (above "Insert header now");
+  floating button right-click opens it: `BTNGUI.OnEvent("ContextMenu", (*) => ShowSettingsGui())`
+  registered in MakeButton.
+- README: Settings section now says settings are edited in the Settings window (tray ->
+  Settings, or right-click the floating button); the ini file remains the storage and stays
+  hand-editable; Model= line note stays.
+- GREEN = `PASSED 86` (82+4), exit 0; GUI behavior verified in checkpoint 5.
+
+### Checkpoint 5 (John, after Task 11 review)
+
+E2E of v1.1: font look in a scratch doc (Times New Roman 20 black, placeholders still
+yellow); progress strip stages visible during a real press; Settings window — change hotkey,
+no-hotkey mode, model switch shows the right note, font change reflected in the next insert,
+hide/show button, key field; then a real-case run. Then desktop shortcut (v1 Task 8 Step 5
+command) and the final whole-branch review.
