@@ -689,7 +689,7 @@ ShowSettingsGui() {
     boldChk := SETGUI.AddCheckbox("x+20 yp" (CFG.headerBold ? " Checked" : ""), "Bold")
 
     SETGUI.AddText("xm y+12", "Blank lines below:")
-    linesDDL := SETGUI.AddDropDownList("w60 x+10 yp-2 Choose" (CFG.linesBelow + 1), "0|1|2|3")
+    linesDDL := SETGUI.AddDropDownList("w60 x+10 yp-2 Choose" (CFG.linesBelow + 1), ["0", "1", "2", "3"])
 
     showBtnChk := SETGUI.AddCheckbox("xm y+14" (CFG.showButton ? " Checked" : ""), "Show floating button")
 
