@@ -421,6 +421,17 @@ AssertTrue(InStr(proseTxt22, "Subjective:") = 0 && InStr(proseTxt22, "2-4 senten
     && InStr(proseTxt22, "No preamble, no headings, no bullet points") > 0,
     "format=prose lacks Subjective label and matches old prose shape")
 
+; Custom instructions must land AFTER the excerpt content, not between the
+; "Excerpt:" label and the excerpt itself - the label must directly precede
+; what it introduces.
+sReqOrder22 := Json.Parse(BuildSummaryRequestBody("MY-EXCERPT-TEXT", "claude-opus-5", "standard", "soap", "note med changes"))
+orderTxt22 := sReqOrder22["messages"][1]["content"][1]["text"]
+AssertTrue(InStr(orderTxt22, "MY-EXCERPT-TEXT") > 0, "excerpt text present in summary prompt")
+AssertTrue(InStr(orderTxt22, "Additional instructions:") > InStr(orderTxt22, "MY-EXCERPT-TEXT"),
+    "custom instructions come after the excerpt, not before it")
+AssertTrue(InStr(orderTxt22, "Excerpt:") < InStr(orderTxt22, "MY-EXCERPT-TEXT"),
+    "Excerpt label directly precedes the excerpt content")
+
 ; Custom summary instructions: appended when present, absent when empty
 sReqCustom22 := Json.Parse(BuildSummaryRequestBody(excerpt16, "claude-opus-5", "standard", "soap", "note all med changes"))
 customTxt22 := sReqCustom22["messages"][1]["content"][1]["text"]

@@ -296,12 +296,15 @@ BuildSummaryRequestBody(excerpt, model, detail := "standard", format := "soap", 
     prompt := "Summarize the following excerpt from a medical record for a medical-legal chronology. "
         . HDR_FormatClause(format, detail) " "
         . HDR_PreambleClause(format) " Excerpt:"
-    if (Trim(custom) != "")
-        prompt .= " Additional instructions: " Trim(custom)
+    ; Custom instructions belong at the true end of the message (after the
+    ; excerpt, not spliced between the "Excerpt:" label and the excerpt it
+    ; introduces) - end-of-message recency, same effective placement the
+    ; page/queue builders already have since their prompt IS the whole text.
+    tail := (Trim(custom) != "") ? '\n\nAdditional instructions: ' Json.Escape(Trim(custom)) : ""
     fb := ModelWantsFallbacks(model) ? '"fallbacks":"default",' : ""
     return '{"model":"' Json.Escape(model) '","max_tokens":16000,' fb
         . '"messages":[{"role":"user","content":['
-        . '{"type":"text","text":"' Json.Escape(prompt) '\n\n' Json.Escape(excerpt) '"}]}]}'
+        . '{"type":"text","text":"' Json.Escape(prompt) '\n\n' Json.Escape(excerpt) tail '"}]}]}'
 }
 
 BuildPageSummaryRequestBody(b64pdf, model, detail := "standard", format := "soap", custom := "") {
