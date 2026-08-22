@@ -1622,3 +1622,60 @@ recounts (125 + ~12), states expected total, GREEN must match, exit 0.
 **Checkpoint 8 (John):** summary font row in Settings; a queued 2-3 page note summarizes
 as one entry in TNR 12; queue count shows on the button; right-click clears; failure keeps
 the queue; single-page and selection modes unchanged. Then merge + push.
+
+### Task 18 (John QoL picks 2026-08-22): queue hotkey, header-from-queue, beep, cost counter, dark buttons
+
+John selected five improvements; declined cancel-request, queue tooltip, start-with-Windows.
+
+**Files:**
+- Modify: `PDFHeaderTool.ahk`
+- Modify: `tests\test_core.ahk`
+- Modify: `README.md` (hotkeys list, beep/cost/queue-header sentences)
+
+**Changes:**
+
+1. **Queue hotkey:** ini `QueueHotkey=` (default EMPTY = none); LoadSettings `queueHotkey`;
+   `Main()` registers -> `RunQueue` when non-empty (same try/catch MsgBox pattern);
+   Settings gains a THIRD hotkey row (capture + unlabeled No-hotkey checkbox + white
+   labels) directly under the summarize row, mirroring it exactly. The equal-hotkey guard
+   extends to all three pairwise: any two non-empty hotkeys equal (case-insensitive) ->
+   MsgBox "Each function needs its own hotkey." and abort the save with the window open.
+2. **Header from queued note:** in `RunInsertCore`, when `SUMQUEUE.Length > 0`: skip
+   `GrabCurrentPage()`; use the FIRST queued entry — `FileToBase64(SUMQUEUE[1].pdfPath)`
+   and DO NOT delete that file (the queue still owns it; the summary run needs it later);
+   progress text `"Reading queued page " SUMQUEUE[1].pageNum "..."`. Everything downstream
+   identical (extraction, header build, insert). Empty queue -> existing behavior
+   unchanged.
+3. **Completion beep:** ini `Beep=1` (default on); LoadSettings `beep` (bool). Helper
+   `HDR_Chime(ok)`: no-op when `CFG.beep` false; success -> `SoundBeep(880, 120)`;
+   failure -> `SoundBeep(300, 250)`. Call it at the pipeline OUTCOME points only: the
+   final success toasts of the header path, `SummarizeAndInsert`'s success, and every
+   failure toast inside `RunInsertCore`/`RunSummarizeCore`/`SummarizeAndInsert` (grab
+   fail, API fail, extract fail, Word insert fail, timeout). NOT on: queue-add toasts,
+   queue-clear, busy toasts, settings validation MsgBoxes. Settings checkbox
+   "Completion beep" (dark pattern), persisted.
+4. **Session cost counter:** globals `SESSION_CALLS := 0`, `SESSION_CENTS := 0.0`. Pure
+   helpers: `ExtractUsage(responseText)` -> `{inTok, outTok}` (from the envelope's
+   `usage.input_tokens`/`output_tokens`; missing/unparseable -> zeros) and
+   `EstimateCents(model, inTok, outTok)` -> Float cents using per-MTok USD rates by model
+   prefix: claude-opus-5 -> 500/2500 cents; claude-fable -> 1000/5000; claude-sonnet-5 ->
+   300/1500; claude-haiku-4-5 -> 100/500; unknown prefix -> -1. Formula:
+   `(inTok*inRate + outTok*outRate) / 1000000.0`. After each HTTP-200 response in both
+   pipelines: increment SESSION_CALLS, add EstimateCents result when >= 0, then update the
+   tray tooltip: `A_IconTip := "PDF Header Tool - " SESSION_CALLS " calls, ~" Format("{:.1f}", SESSION_CENTS) " cents this session"`
+   (omit the cents clause when a call had unknown-model pricing). Helper
+   `HDR_TrackUsage(responseText)` wraps all of this for both call sites.
+5. **Dark floating buttons:** `BTNGUI.BackColor := 0x2B2B2B` (window margins darken;
+   button faces stay system-styled — same accepted limitation as Settings inputs). Same
+   for the progress strip window if trivial (`PROGGUI.BackColor` + white `PROGTEXT` font).
+
+**TDD (pure parts):** RED then GREEN. New assertions: LoadSettings `queueHotkey` default
+"" + override (2); `beep` default true + override 0 (2); `ExtractUsage` happy path +
+missing-usage zeros (2 or 3); `EstimateCents` opus/sonnet/haiku exact math + unknown -1
+(4). Existing tests unmodified. Implementer recounts (141 + ~10-11), states expected
+total, GREEN must match, exit 0.
+
+**Checkpoint 8 (John, combined):** everything from Task 17's checkpoint list PLUS: queue
+hotkey works and rejects duplicates; with pages queued, Insert header reads the first
+queued page; beep on completion/failure (and off via Settings); tray tooltip shows calls +
+cents; buttons/strip darker. Then merge + push.
