@@ -295,6 +295,37 @@ CallClaude(body, apiKey, timeoutSec := 60) {
     return {status: req.Status, text: req.ResponseText}
 }
 
+; --- Settings and toast ------------------------------------------------
+LoadSettings(p := "") {
+    if (p = "")
+        p := A_AppData "\PDFHeaderTool\settings.ini"
+    firstRun := !FileExist(p)
+    if firstRun {
+        SplitPath(p, , &dir)
+        DirCreate(dir)
+        ; UTF-16: the Windows ini API misreads UTF-8-with-BOM files.
+        FileAppend("[Settings]`n"
+            . "ApiKey=`n"
+            . "Hotkey=F8`n"
+            . "Model=claude-opus-5`n"
+            . "ShowButton=1`n"
+            . "ButtonX=`n"
+            . "ButtonY=`n", p, "UTF-16")
+    }
+    return {path: p, firstRun: firstRun,
+        apiKey: Trim(IniRead(p, "Settings", "ApiKey", "")),
+        hotkey: Trim(IniRead(p, "Settings", "Hotkey", "F8")),
+        model: Trim(IniRead(p, "Settings", "Model", "claude-opus-5")),
+        showButton: Trim(IniRead(p, "Settings", "ShowButton", "1")) = "1",
+        btnX: Trim(IniRead(p, "Settings", "ButtonX", "")),
+        btnY: Trim(IniRead(p, "Settings", "ButtonY", ""))}
+}
+
+Toast(msg, ms := 2600) {
+    ToolTip(msg)
+    SetTimer(() => ToolTip(), -ms)
+}
+
 ; --- Startup (guarded so tests can #Include this file) ----------------
 Main() {
     ; Filled in by later tasks.

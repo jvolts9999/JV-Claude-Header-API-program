@@ -1,4 +1,5 @@
 #Requires AutoHotkey v2.0
+#Warn VarUnset, StdOut
 #Include ..\PDFHeaderTool.ahk
 
 global TestFails := 0, TestCount := 0
@@ -112,6 +113,26 @@ bf.Write("Man")
 bf.Close()
 AssertEq(FileToBase64(b64path), "TWFu", "base64 known vector")
 FileDelete(b64path)
+
+; ---- LoadSettings ----
+sPath := A_Temp "\pdfheadertool_settings_test.ini"
+try FileDelete(sPath)
+cfg := LoadSettings(sPath)
+AssertEq(cfg.firstRun ? 1 : 0, 1, "settings first run")
+AssertEq(cfg.hotkey, "F8", "settings default hotkey")
+AssertEq(cfg.model, "claude-opus-5", "settings default model")
+AssertEq(cfg.apiKey, "", "settings default key empty")
+AssertEq(cfg.showButton ? 1 : 0, 1, "settings default button on")
+AssertTrue(FileExist(sPath) != "", "settings file created")
+IniWrite("sk-test-123", sPath, "Settings", "ApiKey")
+IniWrite("", sPath, "Settings", "Hotkey")
+IniWrite("0", sPath, "Settings", "ShowButton")
+cfg := LoadSettings(sPath)
+AssertEq(cfg.firstRun ? 1 : 0, 0, "settings second run")
+AssertEq(cfg.apiKey, "sk-test-123", "settings reads key")
+AssertEq(cfg.hotkey, "", "settings blank hotkey allowed")
+AssertEq(cfg.showButton ? 1 : 0, 0, "settings button off")
+FileDelete(sPath)
 
 FileAppend((TestFails ? "FAILED " TestFails "/" TestCount : "PASSED " TestCount) " tests`n", "*")
 ExitApp(TestFails)
