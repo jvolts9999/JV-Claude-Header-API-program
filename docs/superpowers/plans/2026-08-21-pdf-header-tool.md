@@ -1269,3 +1269,71 @@ yellow); progress strip stages visible during a real press; Settings window — 
 no-hotkey mode, model switch shows the right note, font change reflected in the next insert,
 hide/show button, key field; then a real-case run. Then desktop shortcut (v1 Task 8 Step 5
 command) and the final whole-branch review.
+
+### Task 12 (checkpoint-5 feedback): docked progress strip + imaging headers
+
+John's checkpoint-5 rulings: (a) progress strip sits directly under the floating button,
+connected (flush, same width); near-cursor only when the button is hidden. (b) Imaging
+study reports (MRI, CT, X-ray, ultrasound, myelogram, bone scan — imaging ONLY; EMG/NCS,
+echo and other diagnostics keep their provider) get two-part headers: date + study type,
+no provider segment, no PROVIDER placeholder. Detection by the model via a new required
+boolean `is_imaging` in the structured-output schema.
+
+**Files:**
+- Modify: `PDFHeaderTool.ahk` (PROG_Show; BuildRequestBody prompt+schema; ExtractFields;
+  BuildHeader; RunInsertCore)
+- Modify: `tests\test_core.ahk`
+
+**Changes:**
+
+1. `PROG_Show(text)` — when `BTNGUI != ""` and `DllCall("IsWindowVisible", "ptr", BTNGUI.Hwnd)`:
+   `WinGetPos(&bx, &by, &bw, &bh, BTNGUI)` then show the strip at `x bx`, `y (by + bh)`,
+   width `bw` (`PROGGUI.Show("x" bx " y" (by + bh) " w" bw " NoActivate")`) and `.Move` the
+   text and bar controls to width `bw - 12` at x 6. Otherwise: current near-mouse behavior
+   unchanged. Adapt to the actual current PROG_* code shape.
+2. `BuildRequestBody` — prompt gains a 4th numbered instruction:
+   `(4) is_imaging - true ONLY for imaging study reports: MRI, CT, X-ray, ultrasound, myelogram, bone scan. false for everything else, including EMG/NCS, echocardiograms, procedure notes, and clinic notes.`
+   Schema gains `"is_imaging":{"type":"boolean"}` in properties and `"is_imaging"` appended
+   to `required` (now 4 entries). Fallbacks gating and everything else unchanged.
+3. `ExtractFields` — result gains `imaging` (1/0):
+   `imaging: (f is Map && f.Has("is_imaging") && f["is_imaging"] = true) ? 1 : 0` (computed
+   before the return; JSON true parses to AHK true). Absent key (old-style reply) = 0.
+4. `BuildHeader(dateRaw, provider, noteType, includeProvider := true)` — when
+   `includeProvider` is false, skip the provider segment entirely (no text, no placeholder,
+   no mark): text = date sep noteType, with the existing placeholder/mark logic for date and
+   noteType only. Default true = exact current behavior (word-demo untouched).
+5. `RunInsertCore` — `hdr := BuildHeader(f.date, f.provider, f.notetype, !f.imaging)`.
+
+**Tests (TDD; append before the summary pair; also UPDATE one existing assertion):**
+
+The existing assertion labeled `req schema requires 3 fields` changes to expect 4 with label
+`req schema requires 4 fields` — this is a spec-driven update, not tampering. New block:
+
+```ahk
+; ---- Task 12: imaging headers + schema field ----
+sep12 := " " Chr(0x2014) " "
+h12 := BuildHeader("2023-03-14", "Rad Guy, MD", "MRI Lumbar Spine", false)
+AssertEq(h12.text, "03/14/2023" sep12 "MRI Lumbar Spine", "imaging header omits provider")
+AssertEq(h12.marks.Length, 0, "imaging full has no marks")
+h12 := BuildHeader("", "", "", false)
+AssertEq(h12.text, "MM/DD/YYYY" sep12 "NOTE TYPE", "imaging placeholders two-part")
+AssertEq(h12.marks.Length, 2, "imaging two marks")
+AssertEq(SubStr(h12.text, h12.marks[2].start, h12.marks[2].len), "NOTE TYPE", "imaging note mark offset")
+h12 := BuildHeader("2023-03-14", "John Smith, MD", "Office Visit")
+AssertEq(h12.text, "03/14/2023" sep12 "John Smith, MD" sep12 "Office Visit", "default still three-part")
+f12 := ExtractFields('{"stop_reason":"end_turn","content":[{"type":"text","text":"{\"date_of_service\":\"2023-03-14\",\"provider_name\":\"R, MD\",\"note_type\":\"MRI\",\"is_imaging\":true}"}]}')
+AssertEq(f12.imaging ? 1 : 0, 1, "extract imaging true")
+f12 := ExtractFields('{"stop_reason":"end_turn","content":[{"type":"text","text":"{\"date_of_service\":null,\"provider_name\":null,\"note_type\":null}"}]}')
+AssertEq(f12.imaging ? 1 : 0, 0, "extract imaging default false")
+req12 := Json.Parse(BuildRequestBody("QUJD", "claude-opus-5"))
+AssertTrue(InStr(req12["messages"][1]["content"][2]["text"], "is_imaging") > 0, "prompt mentions is_imaging")
+```
+
+RED note: `BuildHeader(..., false)` with the extra arg on the CURRENT 3-param function
+throws (too many parameters) — which, per the known harness limitation, may surface as a
+dialog+hang rather than printed text. Follow the established kill-and-document pattern if so.
+GREEN = `PASSED 95 tests` (86 + 9 new, 1 updated in place), exit 0.
+
+**Checkpoint 5b (John):** strip appears under the button, connected, button-width; imaging
+page → two-part header with no provider and no PROVIDER placeholder; clinic note → unchanged
+three-part header. Then shortcut + final review.
