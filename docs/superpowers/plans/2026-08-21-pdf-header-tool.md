@@ -1856,3 +1856,47 @@ unmodified unless change 6 forces it (report exactly which and why).
 Assessment & Plan lines, empty sections absent, med-legal items favored; Settings: switch
 to Prose -> old behavior; type a custom instruction -> visibly obeyed on the next summary.
 Then merge + push.
+
+### Task 23 (John checkpoint-9 feedback): kill markdown artifacts, big custom box
+
+John's findings/rulings: summaries render literal `**` (markdown bold) — e.g. an invented
+`**Encounter**` heading and `**Subjective:**` labels. Required: no "Encounter" (or any
+extra) heading at all; labels appear as plain `Subjective:` / `Physical Exam:` /
+`Assessment & Plan:` with no asterisks anywhere. Custom-instructions box grows ~10x:
+multiline, scrollable.
+
+**Files:** `PDFHeaderTool.ahk`, `tests\test_core.ahk`, `README.md` (one line on multiline
+custom instructions).
+
+**Changes:**
+
+1. **Prompt tightening** — `HDR_FormatClause` soap branch appends (before the preamble
+   clause): `"Plain text only: no markdown, no asterisks or bold markers, and no headings or labels of any kind other than exactly 'Subjective:', 'Physical Exam:', and 'Assessment & Plan:'. "`
+   Prose branch's preamble gains `"Plain text only - no markdown or asterisks. "` ahead of
+   its existing sentence. (Adjust `HDR_PreambleClause` or the call sites — implementer's
+   choice, but the resulting default soap prompt must contain the exact
+   no-headings-other-than sentence.)
+2. **Hard strip** — in `ExtractText`, after the existing Trim: `t := StrReplace(t, "**", "")`
+   then re-`Trim`. Every summary path (selection/page/queue, combo or not) flows through
+   `ExtractText`, so this guarantees no double-asterisk ever reaches Word.
+3. **Multiline custom box** — Settings Edit becomes `w400 r8 Multi VScroll` (scrollable,
+   ~10x area). Ini storage is single-line, so add pure helpers:
+   `HDR_EncodeMultiline(v)` -> normalize `` `r`n ``/`` `r `` to `` `n ``, then replace
+   `` `n `` with literal `\n`; `HDR_DecodeMultiline(v)` -> literal `\n` back to `` `n ``.
+   `LoadSettings` decodes `CustomInstructions`; Save encodes before `IniWrite`. The
+   decoded (real-newline) text flows into the builders as today (Json.Escape already
+   handles newlines). Known accepted quirk: a user literally typing backslash-n in the box
+   round-trips as a newline — document in the report, not worth escaping machinery.
+
+**TDD:** RED then GREEN. New assertions: `ExtractText` strips `**`
+(fixture text `"**Subjective:** back pain"` -> `"Subjective: back pain"`) and leaves
+asterisk-free text unchanged (2); `HDR_EncodeMultiline`/`HDR_DecodeMultiline` each way +
+round-trip with embedded CRLF (4); default soap builder text contains
+`"no headings or labels of any kind other than"` (1); prose builder text contains
+`"no markdown"` (1). ~8 new; implementer recounts (182 + 8 = 190 expected), GREEN must
+match, exit 0. Existing tests unmodified unless a preamble-phrase assertion conflicts
+(report which).
+
+**Checkpoint 9b (John):** summaries show plain `Subjective:` labels, no asterisks, no
+Encounter heading; custom box is big and scrolls; a multi-line custom instruction survives
+Save -> reopen -> next summary. Then the branch's final whole-branch review, merge, push.
