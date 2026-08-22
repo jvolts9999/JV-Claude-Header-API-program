@@ -10,9 +10,10 @@ and study type, no provider.
 A second floating button, **Summarize text**, sits directly above the header
 button. Select text in the PDF in Acrobat and click it (it auto-copies the
 selection - no need to press Ctrl+C yourself) to get a 2-4 sentence plain-prose
-summary - what happened, key findings, plan - typed into Word at the cursor.
-Uses the same Claude model as the header button. Toggle it off in Settings
-(**Show Summarize button**) if you only want the single header button.
+summary - what happened, key findings, plan - typed into Word at the cursor;
+with no selection, it summarizes the current PDF page instead. Uses the same
+Claude model as the header button. Toggle it off in Settings (**Show Summarize
+button**) if you only want the single header button.
 
 ## Run
 

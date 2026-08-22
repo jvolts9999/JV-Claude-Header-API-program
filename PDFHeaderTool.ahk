@@ -248,6 +248,17 @@ BuildSummaryRequestBody(excerpt, model) {
         . '{"type":"text","text":"' Json.Escape(prompt) '\n\n' Json.Escape(excerpt) '"}]}]}'
 }
 
+BuildPageSummaryRequestBody(b64pdf, model) {
+    static prompt := "Summarize this page of a medical record for a medical-legal chronology. "
+        . "Write 2-4 sentences of plain prose covering what happened, the key findings, and the plan. "
+        . "No preamble, no headings, no bullet points - just the sentences."
+    fb := ModelWantsFallbacks(model) ? '"fallbacks":"default",' : ""
+    return '{"model":"' Json.Escape(model) '","max_tokens":16000,' fb
+        . '"messages":[{"role":"user","content":['
+        . '{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"' b64pdf '"}},'
+        . '{"type":"text","text":"' Json.Escape(prompt) '"}]}]}'
+}
+
 ExtractFields(responseText) {
     try
         resp := Json.Parse(responseText)
@@ -666,36 +677,51 @@ RunSummarizeCore() {
     Send("^c")
     ClipWait(1)
     excerpt := A_Clipboard
+
+    ; Shared tail for both the selected-text path and the whole-page fallback:
+    ; ask Claude, handle the same status/ExtractText guards, type the result in.
+    SummarizeAndInsert(body, progText) {
+        PROG_Show(progText)
+        pct := 10
+        Tick() {
+            pct := Min(pct + 10, 90)
+            PROG_Set(progText, pct)
+        }
+        r := CallClaude(body, CFG.apiKey, 60, Tick)
+        if (r.status = 0) {
+            Toast(r.err)
+            return
+        }
+        t := ExtractText(r.text)
+        if (r.status != 200) {
+            Toast(t.ok ? "API error HTTP " r.status : t.err)
+            return
+        }
+        if !t.ok {
+            Toast(t.err)
+            return
+        }
+        word.Selection.TypeText(t.text)
+        Toast("Summary inserted.")
+    }
+
     if (excerpt = "") {
-        Toast("Select text in the PDF first.")
+        ; No selection captured - fall back to summarizing the current PDF page.
+        g := GrabCurrentPage()
+        if !g.ok {
+            Toast(g.err)
+            return savedClip
+        }
+        b64 := FileToBase64(g.pdfPath)
+        try FileDelete(g.pdfPath)
+        SummarizeAndInsert(BuildPageSummaryRequestBody(b64, CFG.model), "Summarizing page " g.pageNum "...")
         return savedClip
     }
     if (StrLen(excerpt) > 200000) {
         Toast("Selection is too large.")
         return savedClip
     }
-    PROG_Show("Summarizing...")
-    pct := 10
-    TickSum() {
-        pct := Min(pct + 10, 90)
-        PROG_Set("Summarizing...", pct)
-    }
-    r := CallClaude(BuildSummaryRequestBody(excerpt, CFG.model), CFG.apiKey, 60, TickSum)
-    if (r.status = 0) {
-        Toast(r.err)
-        return savedClip
-    }
-    t := ExtractText(r.text)
-    if (r.status != 200) {
-        Toast(t.ok ? "API error HTTP " r.status : t.err)
-        return savedClip
-    }
-    if !t.ok {
-        Toast(t.err)
-        return savedClip
-    }
-    word.Selection.TypeText(t.text)
-    Toast("Summary inserted.")
+    SummarizeAndInsert(BuildSummaryRequestBody(excerpt, CFG.model), "Summarizing...")
     return savedClip
 }
 
