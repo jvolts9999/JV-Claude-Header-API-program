@@ -507,6 +507,7 @@ LoadSettings(p := "") {
             . "Hotkey=F8`n"
             . "SummarizeHotkey=`n"
             . "QueueHotkey=`n"
+            . "SettingsHotkey=F2`n"
             . "Model=claude-opus-5`n"
             . "ShowButton=1`n"
             . "ShowSummarize=1`n"
@@ -531,6 +532,7 @@ LoadSettings(p := "") {
         hotkey: Trim(IniRead(p, "Settings", "Hotkey", "F8")),
         summarizeHotkey: Trim(IniRead(p, "Settings", "SummarizeHotkey", "")),
         queueHotkey: Trim(IniRead(p, "Settings", "QueueHotkey", "")),
+        settingsHotkey: Trim(IniRead(p, "Settings", "SettingsHotkey", "F2")),
         model: Trim(IniRead(p, "Settings", "Model", "claude-opus-5")),
         showButton: Trim(IniRead(p, "Settings", "ShowButton", "1")) = "1",
         showSummarize: Trim(IniRead(p, "Settings", "ShowSummarize", "1")) = "1",
@@ -1273,6 +1275,14 @@ HDR_ButtonContextMenu(GuiObj, GuiCtrlObj, Item, IsRightClick, X, Y) {
         ShowSettingsGui()
 }
 
+; Hotkey-compatible wrapper: Hotkey callbacks are called with a parameter
+; (ThisHotkey), but ShowSettingsGui takes none - matching the RunInsert/
+; RunSummarize/RunQueue pattern of a plain (*) function as the Hotkey target,
+; rather than an inline arrow lambda repeated at every Hotkey(...) call site.
+RunOpenSettings(*) {
+    ShowSettingsGui()
+}
+
 ShowSettingsGui() {
     global CFG, SETGUI, BTNGUI
     if (SETGUI != "") {
@@ -1332,6 +1342,19 @@ ShowSettingsGui() {
     noHotkeyChk3.OnEvent("Click", SETGUI_ToggleHotkey3)
     SETGUI_ToggleHotkey3(*) {
         hkCtl3.Enabled := !noHotkeyChk3.Value
+    }
+
+    SETGUI.AddText("xm y+12", "Settings hotkey:").SetFont("cWhite")
+    try
+        hkCtl4 := SETGUI.AddHotkey("w150 x+10 yp-2", CFG.settingsHotkey)
+    catch
+        hkCtl4 := SETGUI.AddHotkey("w150 x+10 yp-2")
+    noHotkeyChk4 := SETGUI.AddCheckbox("x+10 yp+2" (CFG.settingsHotkey = "" ? " Checked" : ""))
+    SETGUI.AddText("x+4 yp", "No hotkey").SetFont("cWhite")
+    hkCtl4.Enabled := (CFG.settingsHotkey != "")
+    noHotkeyChk4.OnEvent("Click", SETGUI_ToggleHotkey4)
+    SETGUI_ToggleHotkey4(*) {
+        hkCtl4.Enabled := !noHotkeyChk4.Value
     }
 
     SETGUI.AddText("xm y+12", "Model:").SetFont("cWhite")
@@ -1490,9 +1513,17 @@ ShowSettingsGui() {
             hkVal3 := hkCtl3.Value
             newQueueHotkey := (hkVal3 != "") ? hkVal3 : CFG.queueHotkey
         }
+        newSettingsHotkey := ""
+        if !noHotkeyChk4.Value {
+            hkVal4 := hkCtl4.Value
+            newSettingsHotkey := (hkVal4 != "") ? hkVal4 : CFG.settingsHotkey
+        }
         if ((newHotkey != "" && newSummarizeHotkey != "" && StrLower(newHotkey) = StrLower(newSummarizeHotkey))
             || (newHotkey != "" && newQueueHotkey != "" && StrLower(newHotkey) = StrLower(newQueueHotkey))
-            || (newSummarizeHotkey != "" && newQueueHotkey != "" && StrLower(newSummarizeHotkey) = StrLower(newQueueHotkey))) {
+            || (newHotkey != "" && newSettingsHotkey != "" && StrLower(newHotkey) = StrLower(newSettingsHotkey))
+            || (newSummarizeHotkey != "" && newQueueHotkey != "" && StrLower(newSummarizeHotkey) = StrLower(newQueueHotkey))
+            || (newSummarizeHotkey != "" && newSettingsHotkey != "" && StrLower(newSummarizeHotkey) = StrLower(newSettingsHotkey))
+            || (newQueueHotkey != "" && newSettingsHotkey != "" && StrLower(newQueueHotkey) = StrLower(newSettingsHotkey))) {
             MsgBox("Each function needs its own hotkey.", "PDF Header Tool", "Icon!")
             return
         }
@@ -1539,6 +1570,20 @@ ShowSettingsGui() {
             }
         }
 
+        oldSettingsHotkey := CFG.settingsHotkey
+        if (oldSettingsHotkey != "")
+            try Hotkey(oldSettingsHotkey, "Off")
+        if (newSettingsHotkey != "") {
+            try {
+                Hotkey(newSettingsHotkey, RunOpenSettings, "On")
+            } catch {
+                if (oldSettingsHotkey != "")
+                    try Hotkey(oldSettingsHotkey, RunOpenSettings, "On")
+                MsgBox("'" newSettingsHotkey "' is not a usable hotkey.", "PDF Header Tool", "Icon!")
+                return
+            }
+        }
+
         selIdx := modelDDL.Value
         newModel := (selIdx >= 1 && selIdx <= mo.Length) ? mo[selIdx].id : CFG.model
         newFont := fontCombo.Text
@@ -1561,6 +1606,7 @@ ShowSettingsGui() {
         IniWrite(newHotkey, CFG.path, "Settings", "Hotkey")
         IniWrite(newSummarizeHotkey, CFG.path, "Settings", "SummarizeHotkey")
         IniWrite(newQueueHotkey, CFG.path, "Settings", "QueueHotkey")
+        IniWrite(newSettingsHotkey, CFG.path, "Settings", "SettingsHotkey")
         IniWrite(newModel, CFG.path, "Settings", "Model")
         IniWrite(newFont, CFG.path, "Settings", "HeaderFont")
         IniWrite(newSize, CFG.path, "Settings", "HeaderSize")
@@ -1582,6 +1628,7 @@ ShowSettingsGui() {
         CFG.hotkey := newHotkey
         CFG.summarizeHotkey := newSummarizeHotkey
         CFG.queueHotkey := newQueueHotkey
+        CFG.settingsHotkey := newSettingsHotkey
         CFG.model := newModel
         CFG.headerFont := newFont
         CFG.headerSize := newSize
@@ -1743,6 +1790,13 @@ Main() {
             Hotkey(CFG.queueHotkey, RunQueue)
         catch
             MsgBox("The hotkey '" CFG.queueHotkey "' in settings.ini is not valid. Fix it and reload from the tray menu.",
+                "PDF Header Tool", "Icon!")
+    }
+    if (CFG.settingsHotkey != "") {
+        try
+            Hotkey(CFG.settingsHotkey, RunOpenSettings)
+        catch
+            MsgBox("The hotkey '" CFG.settingsHotkey "' in settings.ini is not valid. Fix it and reload from the tray menu.",
                 "PDF Header Tool", "Icon!")
     }
     if CFG.showButton

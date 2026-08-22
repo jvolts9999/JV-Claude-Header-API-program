@@ -504,5 +504,15 @@ AssertTrue(sfd["success"] = "dictation-stop.wav" && sfd["error"] = "notifv1\erro
 sfb := HDR_SchemeFiles("beep")
 AssertEq(sfb.Count, 0, "schemefiles beep empty map")
 
+; ---- Task 24 extension: settings hotkey ----
+sPath24b := A_Temp "\pdfheadertool_settings_t24b.ini"
+try FileDelete(sPath24b)
+cfg24b := LoadSettings(sPath24b)
+AssertEq(cfg24b.settingsHotkey, "F2", "settings hotkey default F2")
+IniWrite("F6", sPath24b, "Settings", "SettingsHotkey")
+cfg24b := LoadSettings(sPath24b)
+AssertEq(cfg24b.settingsHotkey, "F6", "settings hotkey override read")
+FileDelete(sPath24b)
+
 FileAppend((TestFails ? "FAILED " TestFails "/" TestCount : "PASSED " TestCount) " tests`n", "*")
 ExitApp(TestFails)

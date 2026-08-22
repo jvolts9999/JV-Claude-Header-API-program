@@ -75,18 +75,20 @@ does the same thing: a toast points you at Settings, which opens for you.
 
 ## Settings
 
-Open the Settings window from the tray icon (**Settings**, the first item) or
-by right-clicking the floating button (right-clicking the Queue Summary
-button itself clears the queue instead). Settings covers the hotkey (or
-turning it off), a second optional hotkey for Summarize text, a third
-optional hotkey for Queue Summary, the model, the header font and size, the
+Open the Settings window from the tray icon (**Settings**, the first item), a
+dedicated hotkey (**F2** by default), or by right-clicking the floating
+button (right-clicking the Queue Summary button itself clears the queue
+instead). Settings covers the hotkey (or turning it off), a second optional
+hotkey for Summarize text, a third optional hotkey for Queue Summary, a
+fourth hotkey for opening Settings itself, the model, the header font and
+size, the
 summary font and size, the summary detail level (Concise/Standard/Detailed),
 the summary format (Sectioned (SOAP), the default, or Prose) and custom
 summary instructions, whether the header uses Heading 1 style and bold, how
 many blank lines follow
 it, showing or hiding the floating button and the Summarize/Queue buttons, the
 one-press header+summary combo, the completion beep, and which sound it
-plays. No two of the three
+plays. No two of the four
 hotkeys can be set to the same key. The API key is set via Settings ->
 **API key...**, which
 opens its own small dialog (with a Show/Hide toggle to check it). Save
@@ -101,6 +103,7 @@ hand-editable if you prefer:
 - `Hotkey` - default `F8`; blank disables the hotkey
 - `SummarizeHotkey` - default blank (no hotkey); triggers Summarize text (including the queue, if pages are queued)
 - `QueueHotkey` - default blank (no hotkey); triggers Queue Summary (queues the current page)
+- `SettingsHotkey` - default `F2` (unlike the other three, this one is on by default); opens the Settings window
 - `Model` - default `claude-opus-5`; cheaper alternatives: `claude-sonnet-5` (about 1 cent/press) or `claude-haiku-4-5` (about half a cent/press). Change the line, then Reload from the tray menu.
 - `HeaderFont` - default `Times New Roman`
 - `HeaderSize` - default `20`
