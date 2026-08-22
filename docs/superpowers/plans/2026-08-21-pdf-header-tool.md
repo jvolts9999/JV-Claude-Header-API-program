@@ -1371,3 +1371,63 @@ deleted without a replacement covering the same input shape. Implementer recount
 total, states it in the report, and GREEN must match that stated count with exit 0.
 
 **Checkpoint:** none needed (pure text logic, fully unit-covered); John sees it in daily use.
+
+### Task 14 (John revisions 2026-08-22, round 2): style toggle, bold, lines-below, key reveal, no-key routing
+
+John's rulings: (1) Settings gains an on/off for the **Heading 1 style itself** — default ON;
+when OFF the header inserts as plain text (no `-2` style assignment; font layer still
+applies; John was warned about the suite-sorter consequence and chose it). (2) Blank lines
+below each inserted header: Settings dropdown 0-3, DEFAULT 2. (3) Bold checkbox —
+unchecked (default) = do not touch bold (style's own weight shows, today's look unchanged);
+checked = force `Font.Bold := true` on the header range. (4) API key field: masked as now,
+plus a Show/Hide toggle button that reveals/re-masks the text in place. (5) The no-key
+path in `RunInsertCore` opens the Settings window (`ShowSettingsGui()`) instead of Notepad,
+toast updated ("No API key yet - paste it into Settings and save."); the reload-first
+re-check from the final fix wave stays.
+
+**Files:**
+- Modify: `PDFHeaderTool.ahk` (LoadSettings + first-run template; InsertHeader;
+  RunInsertCore; ShowSettingsGui)
+- Modify: `tests\test_core.ahk`
+- Modify: `README.md` (settings list gains ApplyHeadingStyle / HeaderBold / LinesBelow;
+  no-key sentence updated)
+
+**Ini keys (first-run template + LoadSettings fields):**
+`ApplyHeadingStyle=1` → `applyStyle` (bool, default true); `HeaderBold=0` → `headerBold`
+(bool, default false); `LinesBelow=2` → `linesBelow` (int, clamped 0-3 via new helper
+`HDR_ValidLines(v)`: non-integer or out of range → 2).
+
+**InsertHeader:** signature becomes
+`InsertHeader(hdr, fontName := "", fontSize := 0, applyStyle := true, bold := false, linesBelow := 0)`.
+Behavior: style `-2` applied only when `applyStyle`; font block as now, plus
+`hdrRng.Font.Bold := true` only when `bold` (never force false); after inserting
+`hdr.text "\r"`, when `linesBelow > 0` insert that many additional `"\r"` immediately after
+the header paragraph and set that blank range's `.Style := -1` (wdStyleNormal) so blanks
+never inherit heading style — range math end-exclusive so the following original paragraph
+is untouched. Existing callers with old arg counts keep exact old behavior (defaults).
+`RunInsertCore` passes `CFG.headerFont, CFG.headerSize, CFG.applyStyle, CFG.headerBold, CFG.linesBelow`.
+
+**Settings GUI additions (in this order, after the font/size row):**
+`AddCheckbox` "Apply Heading 1 style" = `CFG.applyStyle`; `AddCheckbox` "Bold" =
+`CFG.headerBold`; `AddDropDownList` "Blank lines below" 0|1|2|3 (Choose = `CFG.linesBelow+1`).
+API key row gains a small "Show" button: toggles the edit's password character via
+`SendMessage(0x00CC, showing ? 0x25CF : 0, 0, apiKeyEdit)`-style EM_SETPASSWORDCHAR
+(reveal = char 0, re-mask = 0x25CF) + control redraw, button text flips Show/Hide.
+Save persists the three new keys (`linesBelow` through `HDR_ValidLines`), updates CFG in
+place, and always re-masks before the window closes.
+
+**No-key routing:** in `RunInsertCore`'s still-missing-key branch, replace
+`Run('notepad.exe ...')` with `ShowSettingsGui()`; first-run Welcome MsgBox no longer opens
+Notepad either - it says the Settings window is opening and opens `ShowSettingsGui()`
+(the ini path stays mentioned for reference).
+
+**TDD (pure parts):** LoadSettings defaults/overrides for the three new fields (~6
+assertions incl. clamp cases: `LinesBelow=7` → 2, `LinesBelow=abc` → 2, `LinesBelow=0`
+stays 0) + `HDR_ValidLines` direct (2 assertions). RED first (property access on missing
+fields FAILs or hangs per known harness modes — kill if hung, document), then GREEN.
+Implementer recounts the suite total (93 + new), states it, GREEN must match with exit 0.
+
+**Checkpoint 6 (John):** style toggle off → plain-text header; back on → Heading 1; bold
+checked → bold header; 2 blank lines appear below and cursor's paragraph untouched;
+Show/Hide reveals and re-masks the key; with key temporarily blanked in Settings, F8 opens
+the Settings window (not Notepad). Then merge + push.
