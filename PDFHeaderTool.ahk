@@ -383,9 +383,109 @@ InsertHeader(hdr) {
     }
 }
 
-; --- Startup (guarded so tests can #Include this file) ----------------
+; --- Pipeline and UI ---------------------------------------------------
+global CFG := ""
+global BUSY := false
+global BTNGUI := ""
+
+RunInsert(*) {
+    global BUSY
+    if BUSY
+        return
+    BUSY := true
+    try
+        RunInsertCore()
+    catch as e
+        Toast("Error: " e.Message)
+    finally
+        BUSY := false
+}
+
+RunInsertCore() {
+    global CFG
+    if (CFG.apiKey = "") {
+        Toast("No API key yet. Paste it after ApiKey= in the file that just opened, save, then try again.")
+        Run('notepad.exe "' CFG.path '"')
+        return
+    }
+    g := GrabCurrentPage()
+    if !g.ok {
+        Toast(g.err)
+        return
+    }
+    Toast("Reading page " g.pageNum "...")
+    b64 := FileToBase64(g.pdfPath)
+    try FileDelete(g.pdfPath)
+    r := CallClaude(BuildRequestBody(b64, CFG.model), CFG.apiKey)
+    f := ExtractFields(r.text)
+    if (r.status != 200) {
+        Toast(f.ok ? "API error HTTP " r.status : f.err)
+        return
+    }
+    if !f.ok {
+        Toast(f.err)
+        return
+    }
+    hdr := BuildHeader(f.date, f.provider, f.notetype)
+    w := InsertHeader(hdr)
+    Toast(w.ok ? hdr.text : w.err)
+}
+
+MakeButton() {
+    global CFG, BTNGUI
+    BTNGUI := Gui("+AlwaysOnTop -Caption +ToolWindow", "PDF Header")
+    BTNGUI.MarginX := 8
+    BTNGUI.MarginY := 8
+    BTNGUI.SetFont("s10 bold")
+    b := BTNGUI.AddButton("w110 h34", "Insert header")
+    b.OnEvent("Click", RunInsert)
+    ; Drag anywhere on the window edge (the margin around the button).
+    OnMessage(0x201, HDR_Drag)      ; WM_LBUTTONDOWN
+    OnMessage(0x232, HDR_DragEnd)   ; WM_EXITSIZEMOVE
+    if (CFG.btnX != "" && CFG.btnY != "")
+        BTNGUI.Show("x" CFG.btnX " y" CFG.btnY " NoActivate")
+    else
+        BTNGUI.Show("NoActivate")
+}
+
+HDR_Drag(wParam, lParam, msg, hwnd) {
+    global BTNGUI
+    if (BTNGUI != "" && hwnd = BTNGUI.Hwnd)
+        PostMessage(0xA1, 2, 0, , BTNGUI)  ; WM_NCLBUTTONDOWN, HTCAPTION
+}
+
+HDR_DragEnd(wParam, lParam, msg, hwnd) {
+    global BTNGUI, CFG
+    if (BTNGUI = "" || hwnd != BTNGUI.Hwnd)
+        return
+    WinGetPos(&x, &y, , , BTNGUI)
+    IniWrite(x, CFG.path, "Settings", "ButtonX")
+    IniWrite(y, CFG.path, "Settings", "ButtonY")
+}
+
 Main() {
-    ; Filled in by later tasks.
+    global CFG
+    CFG := LoadSettings()
+    if CFG.firstRun {
+        MsgBox("Welcome. A settings file was created at:`n`n" CFG.path
+            . "`n`nNotepad is opening it now - paste your Claude API key directly after ApiKey= and save. "
+            . "You can also change the hotkey (blank = none) and hide the button (ShowButton=0) there.",
+            "PDF Header Tool", "Iconi")
+        Run('notepad.exe "' CFG.path '"')
+    }
+    if (CFG.hotkey != "") {
+        try
+            Hotkey(CFG.hotkey, RunInsert)
+        catch
+            MsgBox("The hotkey '" CFG.hotkey "' in settings.ini is not valid. Fix it and reload from the tray menu.",
+                "PDF Header Tool", "Icon!")
+    }
+    if CFG.showButton
+        MakeButton()
+    A_TrayMenu.Insert("1&", "Insert header now", RunInsert)
+    A_TrayMenu.Insert("2&", "Open settings", (*) => Run('notepad.exe "' CFG.path '"'))
+    A_TrayMenu.Insert("3&", "Reload", (*) => Reload())
+    Persistent(true)
 }
 
 if (A_LineFile = A_ScriptFullPath)
