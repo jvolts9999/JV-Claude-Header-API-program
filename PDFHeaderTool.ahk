@@ -635,13 +635,20 @@ InsertHeader(hdr, fontName := "", fontSize := 0, applyStyle := true, bold := fal
             mrng := doc.Range(insertAt + mk.start - 1, insertAt + mk.start - 1 + mk.len)
             mrng.HighlightColorIndex := 7  ; wdYellow
         }
-        return {ok: true}
+        return {ok: true, insertAt: insertAt, len: StrLen(hdr.text)}
     } catch as e {
         return {ok: false, err: "Word rejected the insert: " e.Message}
     }
 }
 
-InsertSummary(text, fontName := "", fontSize := 0) {
+; atPos >= 0 selects positioned mode (used by the header+summary combo): the
+; text is inserted at that document offset instead of at the current
+; Selection, followed by its own paragraph mark so it becomes its own
+; paragraph, then reset to Normal style before the font override below (the
+; blank paragraph it splits out of may carry the header's direct formatting -
+; see InsertHeader's blankRng comment). atPos = -1 (default) is the original
+; Selection-anchored behavior, unchanged.
+InsertSummary(text, fontName := "", fontSize := 0, atPos := -1) {
     try
         word := ComObjActive("Word.Application")
     catch
@@ -651,9 +658,16 @@ InsertSummary(text, fontName := "", fontSize := 0) {
     catch
         return {ok: false, err: "No document is open in Word."}
     try {
-        at := word.Selection.Range.Start
-        doc.Range(at, at).InsertBefore(text)
-        rng := doc.Range(at, at + StrLen(text))
+        if (atPos >= 0) {
+            at := atPos
+            doc.Range(at, at).InsertBefore(text "`r")
+            rng := doc.Range(at, at + StrLen(text) + 1)
+            rng.Style := -1  ; wdStyleNormal
+        } else {
+            at := word.Selection.Range.Start
+            doc.Range(at, at).InsertBefore(text)
+            rng := doc.Range(at, at + StrLen(text))
+        }
         if (fontName != "" || fontSize > 0) {
             if (fontName != "")
                 rng.Font.Name := fontName
@@ -740,7 +754,7 @@ RunInsert(*) {
     }
 }
 
-RunInsertCore() {
+RunInsertCore(combo := false) {
     global CFG, SUMQUEUE
     if (CFG.apiKey = "") {
         CFG := LoadSettings()
@@ -803,12 +817,15 @@ RunInsertCore() {
     }
     PROG_Set("Inserting...", 95)
     hdr := BuildHeader(f.date, f.provider, f.notetype, !f.imaging)
-    w := InsertHeader(hdr, CFG.headerFont, CFG.headerSize, CFG.applyStyle, CFG.headerBold, CFG.linesBelow, CFG.summaryFont, CFG.summarySize)
+    ; combo forces at least one blank line so the summary phase always has a
+    ; separating blank to land on (see the summaryAt derivation in RunSummarize).
+    linesEff := combo ? Max(CFG.linesBelow, 1) : CFG.linesBelow
+    w := InsertHeader(hdr, CFG.headerFont, CFG.headerSize, CFG.applyStyle, CFG.headerBold, linesEff, CFG.summaryFont, CFG.summarySize)
     Toast(w.ok ? hdr.text : w.err)
     HDR_Chime(w.ok)
     if !w.ok
         return false
-    return true
+    return w
 }
 
 RunSummarize(*) {
@@ -817,15 +834,25 @@ RunSummarize(*) {
         return
     BUSY := true
     savedClip := ""
+    summaryAt := -1
     try {
         ; One-press combo (default on, Settings-toggleable): the header phase
-        ; runs first and must actually succeed (RunInsertCore's true/false
+        ; runs first and must actually succeed (RunInsertCore's object/false
         ; return) before the summary phase is allowed to run. A false stop
         ; here is silent by design - the header phase already toasted/chimed
         ; its own failure, so nothing more is said.
-        if (CFG.comboInsert && !RunInsertCore())
-            return
-        RunSummarizeCore(&savedClip)
+        hdrRes := CFG.comboInsert ? RunInsertCore(true) : ""
+        if CFG.comboInsert {
+            if !hdrRes
+                return
+            ; +2 lands on the header's forced separating blank (linesEff >= 1
+            ; guaranteed by RunInsertCore's combo branch) - or the original
+            ; paragraph itself when that blank is the only one - so inserting
+            ; there splits off the summary paragraph directly below it. See
+            ; InsertHeader's geometry comments for the full derivation.
+            summaryAt := hdrRes.insertAt + hdrRes.len + 2
+        }
+        RunSummarizeCore(&savedClip, summaryAt)
     }
     catch as e
         Toast("Error: " e.Message)
@@ -841,7 +868,7 @@ RunSummarize(*) {
 ; not a return value - so the caller's restore-in-finally holds even if this
 ; function throws partway through (the clipboard has already been captured
 ; into the caller's variable by that point, regardless of how this returns).
-RunSummarizeCore(&savedClip) {
+RunSummarizeCore(&savedClip, summaryAt := -1) {
     global CFG, SUMQUEUE
     if (CFG.apiKey = "") {
         CFG := LoadSettings()
@@ -887,7 +914,7 @@ RunSummarizeCore(&savedClip) {
             HDR_Chime(false)
             return false
         }
-        ins := InsertSummary(t.text, CFG.summaryFont, CFG.summarySize)
+        ins := InsertSummary(t.text, CFG.summaryFont, CFG.summarySize, summaryAt)
         if !ins.ok {
             Toast(ins.err)
             HDR_Chime(false)
