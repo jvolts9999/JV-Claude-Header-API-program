@@ -9,13 +9,15 @@ and study type, no provider.
 
 A second floating button, **Summarize text**, sits directly above the header
 button. Select text in the PDF in Acrobat and click it (it auto-copies the
-selection - no need to press Ctrl+C yourself) to get a 2-4 sentence plain-prose
-summary - what happened, key findings, plan - typed into Word at the cursor;
-with no selection, it summarizes the current PDF page instead. Uses the same
-Claude model as the header button. The summary is typed in its own font and
-size (separate from the header font), configurable in Settings. Toggle the
-Summarize button off in Settings (**Show Summarize button**) if you only want
-the single header button.
+selection - no need to press Ctrl+C yourself) to get a plain-prose summary -
+what happened, key findings, plan - typed into Word at the cursor; with no
+selection, it summarizes the current PDF page instead. Uses the same Claude
+model as the header button. Summary length is set in Settings (**Summary
+detail**: Concise = 1-2 sentences, Standard = 2-4 sentences (default),
+Detailed = 4-8 sentences covering relevant history too). The summary is typed
+in its own font and size (separate from the header font), configurable in
+Settings. Toggle the Summarize button off in Settings (**Show Summarize
+button**) if you only want the single header button.
 
 A third button, **Queue Summary**, sits above Summarize text (shown together,
 hidden together). Click it to queue the current PDF page - the label updates
@@ -29,9 +31,10 @@ summary; a failed attempt keeps the queue so you can retry. Right-click the
 Queue button to clear it manually. The queue is session-only (not saved
 between runs).
 
-A short beep plays when a header or summary insert finishes - a higher tone
-on success, a lower one on failure - so you get feedback without having to
-look at the screen. Turn it off in Settings (**Completion beep**). The tray
+A short two-tone chime plays when a header or summary insert finishes - an
+ascending pair of notes on success, a descending pair on failure - so you get
+feedback without having to look at the screen. Turn it off in Settings
+(**Completion beep**). The tray
 icon's tooltip tracks calls made and an estimated cost for the session, e.g.
 "PDF Header Tool - 12 calls, ~8.4 cents this session" (the cost is a rough
 estimate from Anthropic's published per-token pricing, not a billing figure,
@@ -51,9 +54,10 @@ by right-clicking the floating button (right-clicking the Queue Summary
 button itself clears the queue instead). Settings covers the hotkey (or
 turning it off), a second optional hotkey for Summarize text, a third
 optional hotkey for Queue Summary, the model, the header font and size, the
-summary font and size, whether the header uses Heading 1 style and bold, how
-many blank lines follow it, showing or hiding the floating button and the
-Summarize/Queue buttons, and the completion beep. No two of the three
+summary font and size, the summary detail level (Concise/Standard/Detailed),
+whether the header uses Heading 1 style and bold, how many blank lines follow
+it, showing or hiding the floating button and the Summarize/Queue buttons, and
+the completion beep. No two of the three
 hotkeys can be set to the same key. The API key is set via Settings ->
 **API key...**, which
 opens its own small dialog (with a Show/Hide toggle to check it). Save
@@ -74,9 +78,10 @@ hand-editable if you prefer:
 - `LinesBelow` - blank lines inserted after the header, `0`-`3`, default `2`
 - `SummaryFont` - default `Times New Roman`; font used for inserted summaries
 - `SummarySize` - default `12`; size used for inserted summaries
+- `SummaryDetail` - `concise`, `standard` (default), or `detailed` - how many sentences the three summary prompts ask for; anything else falls back to `standard`
 - `ShowButton` - `1` shows the floating button, `0` hides it
 - `ShowSummarize` - `1` shows the Summarize text and Queue Summary buttons above it, `0` hides both
-- `Beep` - `1` plays a completion beep (success/failure tone) after each header or summary insert, `0` disables it
+- `Beep` - `1` plays a completion chime (ascending on success, descending on failure) after each header or summary insert, `0` disables it
 - `ButtonX`/`ButtonY` - remembered button position (set automatically)
 
 ## Tests

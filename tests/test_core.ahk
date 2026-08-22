@@ -333,5 +333,42 @@ AssertEq(EstimateCents("claude-sonnet-5", 1000, 1000), 1.8, "estimatecents sonne
 AssertEq(EstimateCents("claude-haiku-4-5", 1000, 1000), 0.6, "estimatecents haiku math")
 AssertEq(EstimateCents("claude-nonexistent", 1000, 1000), -1, "estimatecents unknown model")
 
+; ---- Task 19: blank-line font fix, two-tone chime, summary detail levels ----
+
+; HDR_DetailClause
+AssertEq(HDR_DetailClause("concise"), "Write 1-2 sentences of plain prose.",
+    "detail clause concise")
+AssertEq(HDR_DetailClause("standard"), "Write 2-4 sentences of plain prose covering what happened, the key findings, and the plan.",
+    "detail clause standard")
+AssertEq(HDR_DetailClause("detailed"), "Write 4-8 sentences of plain prose covering what happened, the relevant history, the key findings, and the plan.",
+    "detail clause detailed")
+AssertEq(HDR_DetailClause("garbage"), "Write 2-4 sentences of plain prose covering what happened, the key findings, and the plan.",
+    "detail clause garbage falls back to standard")
+
+; LoadSettings: summaryDetail
+sPath19 := A_Temp "\pdfheadertool_settings_t19.ini"
+try FileDelete(sPath19)
+cfg19 := LoadSettings(sPath19)
+AssertEq(cfg19.summaryDetail, "standard", "summary detail default standard")
+IniWrite("Detailed", sPath19, "Settings", "SummaryDetail")
+cfg19 := LoadSettings(sPath19)
+AssertEq(cfg19.summaryDetail, "detailed", "summary detail override read, case-insensitive")
+IniWrite("garbage", sPath19, "Settings", "SummaryDetail")
+cfg19 := LoadSettings(sPath19)
+AssertEq(cfg19.summaryDetail, "standard", "summary detail garbage clamp falls back to standard")
+FileDelete(sPath19)
+
+; The three summary builders honor detail:="concise" (default "2-4 sentences"
+; behavior is already covered by the unmodified Task 16/17 assertions above).
+sReqConcise := Json.Parse(BuildSummaryRequestBody(excerpt16, "claude-opus-5", "concise"))
+AssertTrue(InStr(sReqConcise["messages"][1]["content"][1]["text"], "1-2 sentences") > 0,
+    "summary req concise detail shortens prompt")
+pReqConcise := Json.Parse(BuildPageSummaryRequestBody("QUJD", "claude-opus-5", "concise"))
+AssertTrue(InStr(pReqConcise["messages"][1]["content"][2]["text"], "1-2 sentences") > 0,
+    "page summary req concise detail shortens prompt")
+qReqConcise := Json.Parse(BuildQueueSummaryRequestBody(qList, "claude-opus-5", "concise"))
+AssertTrue(InStr(qReqConcise["messages"][1]["content"][4]["text"], "1-2 sentences") > 0,
+    "queue summary req concise detail shortens prompt")
+
 FileAppend((TestFails ? "FAILED " TestFails "/" TestCount : "PASSED " TestCount) " tests`n", "*")
 ExitApp(TestFails)

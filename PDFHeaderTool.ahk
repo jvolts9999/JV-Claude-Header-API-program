@@ -238,9 +238,24 @@ BuildRequestBody(b64pdf, model) {
         . '"output_config":{"format":{"type":"json_schema","schema":' schema '}}}'
 }
 
-BuildSummaryRequestBody(excerpt, model) {
-    static prompt := "Summarize the following excerpt from a medical record for a medical-legal chronology. "
-        . "Write 2-4 sentences of plain prose covering what happened, the key findings, and the plan. "
+; Sentence-count instruction shared by all three summary prompt builders,
+; keyed by summary detail level (case-insensitive). Anything other than
+; concise/detailed falls back to standard - same rule LoadSettings applies
+; when it clamps CFG.summaryDetail.
+HDR_DetailClause(level) {
+    switch StrLower(Trim(level)) {
+        case "concise":
+            return "Write 1-2 sentences of plain prose."
+        case "detailed":
+            return "Write 4-8 sentences of plain prose covering what happened, the relevant history, the key findings, and the plan."
+        default:
+            return "Write 2-4 sentences of plain prose covering what happened, the key findings, and the plan."
+    }
+}
+
+BuildSummaryRequestBody(excerpt, model, detail := "standard") {
+    prompt := "Summarize the following excerpt from a medical record for a medical-legal chronology. "
+        . HDR_DetailClause(detail) " "
         . "No preamble, no headings, no bullet points - just the sentences. Excerpt:"
     fb := ModelWantsFallbacks(model) ? '"fallbacks":"default",' : ""
     return '{"model":"' Json.Escape(model) '","max_tokens":16000,' fb
@@ -248,9 +263,9 @@ BuildSummaryRequestBody(excerpt, model) {
         . '{"type":"text","text":"' Json.Escape(prompt) '\n\n' Json.Escape(excerpt) '"}]}]}'
 }
 
-BuildPageSummaryRequestBody(b64pdf, model) {
-    static prompt := "Summarize this page of a medical record for a medical-legal chronology. "
-        . "Write 2-4 sentences of plain prose covering what happened, the key findings, and the plan. "
+BuildPageSummaryRequestBody(b64pdf, model, detail := "standard") {
+    prompt := "Summarize this page of a medical record for a medical-legal chronology. "
+        . HDR_DetailClause(detail) " "
         . "No preamble, no headings, no bullet points - just the sentences."
     fb := ModelWantsFallbacks(model) ? '"fallbacks":"default",' : ""
     return '{"model":"' Json.Escape(model) '","max_tokens":16000,' fb
@@ -259,10 +274,10 @@ BuildPageSummaryRequestBody(b64pdf, model) {
         . '{"type":"text","text":"' Json.Escape(prompt) '"}]}]}'
 }
 
-BuildQueueSummaryRequestBody(b64List, model) {
-    static prompt := "These pages are one multi-page note from a medical record, in order. "
+BuildQueueSummaryRequestBody(b64List, model, detail := "standard") {
+    prompt := "These pages are one multi-page note from a medical record, in order. "
         . "Summarize the note for a medical-legal chronology. "
-        . "Write 2-4 sentences of plain prose covering what happened, the key findings, and the plan. "
+        . HDR_DetailClause(detail) " "
         . "No preamble, no headings, no bullet points - just the sentences."
     fb := ModelWantsFallbacks(model) ? '"fallbacks":"default",' : ""
     blocks := ""
@@ -453,6 +468,7 @@ LoadSettings(p := "") {
             . "LinesBelow=2`n"
             . "SummaryFont=Times New Roman`n"
             . "SummarySize=12`n"
+            . "SummaryDetail=standard`n"
             . "Beep=1`n", p, "UTF-16")
     }
     return {path: p, firstRun: firstRun,
@@ -472,7 +488,15 @@ LoadSettings(p := "") {
         linesBelow: HDR_ValidLines(Trim(IniRead(p, "Settings", "LinesBelow", "2"))),
         summaryFont: Trim(IniRead(p, "Settings", "SummaryFont", "Times New Roman")),
         summarySize: HDR_ValidSize(Trim(IniRead(p, "Settings", "SummarySize", "12")), 12),
+        summaryDetail: HDR_ValidDetail(Trim(IniRead(p, "Settings", "SummaryDetail", "standard"))),
         beep: Trim(IniRead(p, "Settings", "Beep", "1")) = "1"}
+}
+
+; Canonicalizes a SummaryDetail ini value to lowercase concise/standard/detailed;
+; anything else (garbage, blank, wrong case) falls back to standard.
+HDR_ValidDetail(v) {
+    lv := StrLower(Trim(v))
+    return (lv = "concise" || lv = "detailed") ? lv : "standard"
 }
 
 HDR_ValidSize(v, fallback := 20) {
@@ -519,10 +543,13 @@ HDR_Chime(ok) {
     global CFG
     if !CFG.beep
         return
-    if ok
-        SoundBeep(880, 120)
-    else
-        SoundBeep(300, 250)
+    if ok {
+        SoundBeep(523, 60)
+        SoundBeep(784, 90)
+    } else {
+        SoundBeep(400, 80)
+        SoundBeep(300, 120)
+    }
 }
 
 ; --- Acrobat -----------------------------------------------------------
@@ -555,7 +582,7 @@ GrabCurrentPage() {
 }
 
 ; --- Word --------------------------------------------------------------
-InsertHeader(hdr, fontName := "", fontSize := 0, applyStyle := true, bold := false, linesBelow := 0) {
+InsertHeader(hdr, fontName := "", fontSize := 0, applyStyle := true, bold := false, linesBelow := 0, fontName2 := "", fontSize2 := 0) {
     try
         word := ComObjActive("Word.Application")
     catch
@@ -590,6 +617,17 @@ InsertHeader(hdr, fontName := "", fontSize := 0, applyStyle := true, bold := fal
             blankStart := insertAt + StrLen(hdr.text) + 1
             blankRng := doc.Range(blankStart, blankStart + linesBelow)
             blankRng.Style := -1  ; wdStyleNormal - blanks never inherit heading style
+            ; Style alone doesn't clear direct character formatting (e.g. the
+            ; header's own font/size survives as direct formatting on these
+            ; paragraph marks) - explicitly reset the blank range to the
+            ; summary font/size so what gets typed there next is body-sized.
+            if (fontName2 != "" || fontSize2 > 0) {
+                if (fontName2 != "")
+                    blankRng.Font.Name := fontName2
+                if (fontSize2 > 0)
+                    blankRng.Font.Size := fontSize2
+                blankRng.Font.Color := 0  ; black - matches the header range's own reset
+            }
         }
         for mk in hdr.marks {
             mrng := doc.Range(insertAt + mk.start - 1, insertAt + mk.start - 1 + mk.len)
@@ -763,7 +801,7 @@ RunInsertCore() {
     }
     PROG_Set("Inserting...", 95)
     hdr := BuildHeader(f.date, f.provider, f.notetype, !f.imaging)
-    w := InsertHeader(hdr, CFG.headerFont, CFG.headerSize, CFG.applyStyle, CFG.headerBold, CFG.linesBelow)
+    w := InsertHeader(hdr, CFG.headerFont, CFG.headerSize, CFG.applyStyle, CFG.headerBold, CFG.linesBelow, CFG.summaryFont, CFG.summarySize)
     Toast(w.ok ? hdr.text : w.err)
     HDR_Chime(w.ok)
 }
@@ -855,7 +893,7 @@ RunSummarizeCore(&savedClip) {
         b64List := []
         for item in SUMQUEUE
             b64List.Push(FileToBase64(item.pdfPath))
-        ok := SummarizeAndInsert(BuildQueueSummaryRequestBody(b64List, CFG.model), "Summarizing " n " queued pages...")
+        ok := SummarizeAndInsert(BuildQueueSummaryRequestBody(b64List, CFG.model, CFG.summaryDetail), "Summarizing " n " queued pages...")
         if ok {
             for item in SUMQUEUE
                 try FileDelete(item.pdfPath)
@@ -885,14 +923,14 @@ RunSummarizeCore(&savedClip) {
         }
         b64 := FileToBase64(g.pdfPath)
         try FileDelete(g.pdfPath)
-        SummarizeAndInsert(BuildPageSummaryRequestBody(b64, CFG.model), "Summarizing page " g.pageNum "...")
+        SummarizeAndInsert(BuildPageSummaryRequestBody(b64, CFG.model, CFG.summaryDetail), "Summarizing page " g.pageNum "...")
         return
     }
     if (StrLen(excerpt) > 200000) {
         Toast("Selection is too large.")
         return
     }
-    SummarizeAndInsert(BuildSummaryRequestBody(excerpt, CFG.model), "Summarizing...")
+    SummarizeAndInsert(BuildSummaryRequestBody(excerpt, CFG.model, CFG.summaryDetail), "Summarizing...")
 }
 
 ; SUMQUEUE label text lives on the Queue button itself; this is the one place
@@ -1135,6 +1173,18 @@ ShowSettingsGui() {
     sSizeEdit := SETGUI.AddEdit("w60 x+6 yp-4 Number", CFG.summarySize)
     SETGUI.AddUpDown("Range6-72", CFG.summarySize)
 
+    SETGUI.AddText("xm y+12", "Summary detail:").SetFont("cWhite")
+    detailItems := ["Concise", "Standard", "Detailed"]
+    detailLevels := ["concise", "standard", "detailed"]
+    detailIdx := 2
+    for i, lvl in detailLevels {
+        if (lvl = CFG.summaryDetail) {
+            detailIdx := i
+            break
+        }
+    }
+    detailDDL := SETGUI.AddDropDownList("w120 x+10 yp-2 Choose" detailIdx, detailItems)
+
     applyStyleChk := SETGUI.AddCheckbox("xm y+14" (CFG.applyStyle ? " Checked" : ""))
     SETGUI.AddText("x+4 yp", "Apply Heading 1 style").SetFont("cWhite")
     boldChk := SETGUI.AddCheckbox("x+20 yp" (CFG.headerBold ? " Checked" : ""))
@@ -1233,6 +1283,7 @@ ShowSettingsGui() {
         newSize := HDR_ValidSize(sizeEdit.Text)
         newSummaryFont := sFontCombo.Text
         newSummarySize := HDR_ValidSize(sSizeEdit.Text, 12)
+        newSummaryDetail := detailLevels[detailDDL.Value]
         newApiKey := Trim(pendingApiKey)
         newShowButton := showBtnChk.Value ? true : false
         newShowSummarize := showSummarizeChk.Value ? true : false
@@ -1249,6 +1300,7 @@ ShowSettingsGui() {
         IniWrite(newSize, CFG.path, "Settings", "HeaderSize")
         IniWrite(newSummaryFont, CFG.path, "Settings", "SummaryFont")
         IniWrite(newSummarySize, CFG.path, "Settings", "SummarySize")
+        IniWrite(newSummaryDetail, CFG.path, "Settings", "SummaryDetail")
         IniWrite(newShowButton ? "1" : "0", CFG.path, "Settings", "ShowButton")
         IniWrite(newShowSummarize ? "1" : "0", CFG.path, "Settings", "ShowSummarize")
         IniWrite(newApiKey, CFG.path, "Settings", "ApiKey")
@@ -1265,6 +1317,7 @@ ShowSettingsGui() {
         CFG.headerSize := newSize
         CFG.summaryFont := newSummaryFont
         CFG.summarySize := newSummarySize
+        CFG.summaryDetail := newSummaryDetail
         CFG.showButton := newShowButton
         CFG.showSummarize := newShowSummarize
         CFG.apiKey := newApiKey
