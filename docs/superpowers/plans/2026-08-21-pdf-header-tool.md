@@ -1679,3 +1679,41 @@ total, GREEN must match, exit 0.
 hotkey works and rejects duplicates; with pages queued, Insert header reads the first
 queued page; beep on completion/failure (and off via Settings); tray tooltip shows calls +
 cents; buttons/strip darker. Then merge + push.
+
+### Task 19 (John checkpoint-8 feedback): blank-line font bug, two-tone chime, summary detail levels
+
+John's findings/rulings: (a) BUG — the blank lines below a header render at 24pt: leftover
+direct character formatting survives the paragraph-style reset. Fix: after styling the
+blank range Normal (-1), explicitly set its `Font.Name := fontName2`, `Font.Size :=
+fontSize2`, `Font.Color := 0` where fontName2/fontSize2 are NEW InsertHeader parameters
+carrying `CFG.summaryFont`/`CFG.summarySize` (body text follows the summary font — what he
+types there next should be body-sized). (b) Beep character becomes a Wispr-Flow-like
+two-tone chime: success = ascending pair `SoundBeep(523, 60)` then `SoundBeep(784, 90)`;
+failure = descending pair `SoundBeep(400, 80)` then `SoundBeep(300, 120)` — inside
+`HDR_Chime`, still gated on `CFG.beep`, call sites unchanged. (c) Summary conciseness:
+ini `SummaryDetail=standard` (values `concise|standard|detailed`, anything else ->
+`standard`); LoadSettings field `summaryDetail`; Settings dropdown "Summary detail"
+(Concise / Standard / Detailed, dark pattern, persisted); the THREE summary prompt
+builders swap their sentence instruction per level:
+- concise: "Write 1-2 sentences of plain prose."
+- standard: "Write 2-4 sentences of plain prose covering what happened, the key findings, and the plan."
+- detailed: "Write 4-8 sentences of plain prose covering what happened, the relevant history, the key findings, and the plan."
+The shared fragment lives in one helper `HDR_DetailClause(level)` used by
+`BuildSummaryRequestBody`, `BuildPageSummaryRequestBody`, `BuildQueueSummaryRequestBody` —
+each gains a `detail` parameter (default `"standard"` so existing tests that assert
+"2-4 sentences" keep passing unmodified); pipelines pass `CFG.summaryDetail`.
+
+**Files:** `PDFHeaderTool.ahk`, `tests\test_core.ahk`, `README.md`.
+
+**TDD (pure parts):** RED then GREEN. New assertions: `HDR_DetailClause` three levels +
+garbage->standard (4); LoadSettings `summaryDetail` default + override + garbage clamp
+(3); each of the three builders with `detail:="concise"` contains "1-2 sentences" and with
+default contains "2-4 sentences" (existing default assertions already cover the latter —
+add the three concise checks) (3). Existing tests unmodified. Implementer recounts
+(153 + ~10), states expected total, GREEN must match, exit 0. InsertHeader blank-font
+change and chime are COM/audio — code-reviewed + John-verified only (no audible beeps in
+tests).
+
+**Checkpoint 8b (John):** blank lines below a header are 12pt (type into one to confirm);
+chime sounds Wispr-like; Summary detail dropdown changes summary length across all three
+modes. Plus anything from checkpoint 8 not yet confirmed. Then merge + push.
