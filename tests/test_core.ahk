@@ -87,7 +87,7 @@ AssertTrue(InStr(req["messages"][1]["content"][2]["text"], "date_of_service") > 
 fmt := req["output_config"]["format"]
 AssertEq(fmt["type"], "json_schema", "req schema type")
 AssertEq(fmt["schema"]["additionalProperties"], false, "req schema closed")
-AssertEq(fmt["schema"]["required"].Length, 3, "req schema requires 3 fields")
+AssertEq(fmt["schema"]["required"].Length, 4, "req schema requires 4 fields")
 
 ; ---- ExtractFields ----
 ok := '{"stop_reason":"end_turn","content":[{"type":"thinking","thinking":""},'
@@ -171,6 +171,24 @@ AssertEq(mo.Length, 3, "model options count")
 AssertEq(mo[1].id, "claude-opus-5", "model options first id")
 AssertTrue(InStr(ModelNoteFor("claude-haiku-4-5"), "cheapest") > 0, "haiku note text")
 AssertEq(ModelNoteFor("claude-nonexistent"), "", "unknown model empty note")
+
+; ---- Task 12: imaging headers + schema field ----
+sep12 := " " Chr(0x2014) " "
+h12 := BuildHeader("2023-03-14", "Rad Guy, MD", "MRI Lumbar Spine", false)
+AssertEq(h12.text, "03/14/2023" sep12 "MRI Lumbar Spine", "imaging header omits provider")
+AssertEq(h12.marks.Length, 0, "imaging full has no marks")
+h12 := BuildHeader("", "", "", false)
+AssertEq(h12.text, "MM/DD/YYYY" sep12 "NOTE TYPE", "imaging placeholders two-part")
+AssertEq(h12.marks.Length, 2, "imaging two marks")
+AssertEq(SubStr(h12.text, h12.marks[2].start, h12.marks[2].len), "NOTE TYPE", "imaging note mark offset")
+h12 := BuildHeader("2023-03-14", "John Smith, MD", "Office Visit")
+AssertEq(h12.text, "03/14/2023" sep12 "John Smith, MD" sep12 "Office Visit", "default still three-part")
+f12 := ExtractFields('{"stop_reason":"end_turn","content":[{"type":"text","text":"{\"date_of_service\":\"2023-03-14\",\"provider_name\":\"R, MD\",\"note_type\":\"MRI\",\"is_imaging\":true}"}]}')
+AssertEq(f12.imaging ? 1 : 0, 1, "extract imaging true")
+f12 := ExtractFields('{"stop_reason":"end_turn","content":[{"type":"text","text":"{\"date_of_service\":null,\"provider_name\":null,\"note_type\":null}"}]}')
+AssertEq(f12.imaging ? 1 : 0, 0, "extract imaging default false")
+req12 := Json.Parse(BuildRequestBody("QUJD", "claude-opus-5"))
+AssertTrue(InStr(req12["messages"][1]["content"][2]["text"], "is_imaging") > 0, "prompt mentions is_imaging")
 
 FileAppend((TestFails ? "FAILED " TestFails "/" TestCount : "PASSED " TestCount) " tests`n", "*")
 ExitApp(TestFails)

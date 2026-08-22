@@ -191,7 +191,7 @@ HDR_FmtDate(mo, d, y) {
     return Format("{:02}/{:02}/{:04}", mo, d, y)
 }
 
-BuildHeader(dateRaw, provider, noteType) {
+BuildHeader(dateRaw, provider, noteType, includeProvider := true) {
     sep := " " Chr(0x2014) " "
     marks := []
     d := NormalizeDateMDY(dateRaw)
@@ -200,12 +200,14 @@ BuildHeader(dateRaw, provider, noteType) {
         marks.Push({start: 1, len: StrLen(d)})
     }
     text := d sep
-    p := Trim(provider)
-    if (p = "") {
-        p := "PROVIDER"
-        marks.Push({start: StrLen(text) + 1, len: StrLen(p)})
+    if includeProvider {
+        p := Trim(provider)
+        if (p = "") {
+            p := "PROVIDER"
+            marks.Push({start: StrLen(text) + 1, len: StrLen(p)})
+        }
+        text .= p sep
     }
-    text .= p sep
     n := Trim(noteType)
     if (n = "") {
         n := "NOTE TYPE"
@@ -221,12 +223,14 @@ BuildRequestBody(b64pdf, model) {
         . "(1) date_of_service - the date this note, encounter, or study took place; never a print, fax, or signature date. "
         . "(2) provider_name - the clinician who authored or performed it, with credential if shown, like 'John Smith, MD'. "
         . "(3) note_type - a short label for the document type, like 'Office Visit', 'Operative Report', 'MRI Lumbar Spine', 'Physical Therapy', 'Discharge Summary', 'ER Visit'. "
+        . "(4) is_imaging - true ONLY for imaging study reports: MRI, CT, X-ray, ultrasound, myelogram, bone scan. false for everything else, including EMG/NCS, echocardiograms, procedure notes, and clinic notes. "
         . "Use null for any field this page does not establish."
     static schema := '{"type":"object","properties":{'
         . '"date_of_service":{"type":["string","null"]},'
         . '"provider_name":{"type":["string","null"]},'
-        . '"note_type":{"type":["string","null"]}},'
-        . '"required":["date_of_service","provider_name","note_type"],'
+        . '"note_type":{"type":["string","null"]},'
+        . '"is_imaging":{"type":"boolean"}},'
+        . '"required":["date_of_service","provider_name","note_type","is_imaging"],'
         . '"additionalProperties":false}'
     fb := (SubStr(model, 1, 13) = "claude-opus-5" || SubStr(model, 1, 12) = "claude-fable") ? '"fallbacks":"default",' : ""
     return '{"model":"' Json.Escape(model) '","max_tokens":16000,' fb
@@ -260,9 +264,11 @@ ExtractFields(responseText) {
         f := Json.Parse(txt)
     catch
         return {ok: false, err: "The model reply was not valid JSON."}
+    imaging := (f is Map && f.Has("is_imaging") && f["is_imaging"] = true) ? 1 : 0
     return {ok: true, date: HDR_Field(f, "date_of_service"),
         provider: HDR_Field(f, "provider_name"),
-        notetype: HDR_Field(f, "note_type")}
+        notetype: HDR_Field(f, "note_type"),
+        imaging: imaging}
 }
 
 HDR_Field(m, k) {
@@ -450,7 +456,7 @@ global SETGUI := ""
 ; Small floating status window - text + a stepping progress bar, shown
 ; near the mouse. PROG_Show creates the Gui once and reuses it on later runs.
 PROG_Show(text) {
-    global PROGGUI, PROGTEXT, PROGBAR
+    global PROGGUI, PROGTEXT, PROGBAR, BTNGUI
     if (PROGGUI = "") {
         PROGGUI := Gui("+AlwaysOnTop -Caption +ToolWindow", "PDF Header Progress")
         PROGGUI.MarginX := 10
@@ -462,8 +468,15 @@ PROG_Show(text) {
         PROGTEXT.Text := text
         PROGBAR.Value := 0
     }
-    MouseGetPos(&mx, &my)
-    PROGGUI.Show("x" (mx + 16) " y" (my + 16) " NoActivate")
+    if (BTNGUI != "" && DllCall("IsWindowVisible", "ptr", BTNGUI.Hwnd)) {
+        WinGetPos(&bx, &by, &bw, &bh, BTNGUI)
+        PROGTEXT.Move(6, , bw - 12)
+        PROGBAR.Move(6, , bw - 12)
+        PROGGUI.Show("x" bx " y" (by + bh) " w" bw " NoActivate")
+    } else {
+        MouseGetPos(&mx, &my)
+        PROGGUI.Show("x" (mx + 16) " y" (my + 16) " NoActivate")
+    }
 }
 
 PROG_Set(text, pct) {
@@ -532,7 +545,7 @@ RunInsertCore() {
         return
     }
     PROG_Set("Inserting...", 95)
-    hdr := BuildHeader(f.date, f.provider, f.notetype)
+    hdr := BuildHeader(f.date, f.provider, f.notetype, !f.imaging)
     w := InsertHeader(hdr, CFG.headerFont, CFG.headerSize)
     Toast(w.ok ? hdr.text : w.err)
 }
