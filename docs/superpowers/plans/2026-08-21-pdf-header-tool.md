@@ -1798,3 +1798,61 @@ setting.
 **Checkpoint 8d (John):** combo press on an empty line: header, ONE blank, summary below
 it, all at the configured fonts (header size, summary size); original paragraph untouched
 below; non-combo summarize still inserts at the cursor; header-only button unchanged.
+
+### Task 22 (John 2026-08-22): SOAP summary format, med-legal orientation, custom instructions
+
+John's rulings: summaries default to a SECTIONED format — labeled lines `Subjective:`,
+`Physical Exam:`, `Assessment & Plan:` — with sections OMITTED when the source documents
+nothing for them; a Settings dropdown switches back to plain prose. No FLAGS line, no
+med-legal toggle ("do nothing" on surfacing) — instead the sectioned base prompt itself
+instructs prioritizing findings of potential medical-legal significance (sentinel events,
+complications, new or missed findings, deviations from expected care, turning points).
+A free-text `Custom summary instructions` Settings field is appended to every summary
+prompt when non-empty (his permanent tuning knob).
+
+**Files:** `PDFHeaderTool.ahk`, `tests\test_core.ahk`, `README.md`.
+
+**Changes:**
+
+1. Ini: `SummaryFormat=soap` (values `soap|prose`, clamp helper `HDR_ValidFormat(v)` —
+   case-insensitive, anything else -> `soap`); `CustomInstructions=` (single-line free
+   text, default empty). LoadSettings fields `summaryFormat`, `customInstructions`.
+2. `HDR_DetailClause(level, soap := false)`: prose variants unchanged (existing strings
+   verbatim — tests depend on them); soap variants keep the same sentence-budget phrase
+   so existing substring assertions survive: concise `"Write 1-2 sentences in total across the sections."`,
+   standard `"Write 2-4 sentences in total across the sections."`, detailed
+   `"Write 4-8 sentences in total across the sections."`.
+3. New `HDR_FormatClause(format, detail)`: when `prose` -> exactly
+   `HDR_DetailClause(detail)` (byte-identical to today's output). When `soap` ->
+   `"Structure the summary as labeled lines, including a section ONLY when the source documents it (omit empty sections): 'Subjective:' - history and complaints; 'Physical Exam:' - objective findings; 'Assessment & Plan:' - impressions, decisions, and treatment. Prioritize findings of potential medical-legal significance: sentinel events, complications, new or missed findings, deviations from expected care, and turning points in the clinical course. "`
+   followed by `HDR_DetailClause(detail, true)`.
+4. All three summary builders: signature gains `format := "soap"` and `custom := ""`
+   (LAST two params). The prompt swaps its old detail clause for
+   `HDR_FormatClause(format, detail)`; when `Trim(custom) != ""` append
+   `" Additional instructions: " Trim(custom)` at the very end (before Json.Escape of the
+   whole prompt, as today). Pipelines pass `CFG.summaryDetail, CFG.summaryFormat,
+   CFG.customInstructions` at all three call sites.
+5. Settings GUI (dark pattern): `Summary format` DDL with ARRAY items
+   `["Sectioned (SOAP)", "Prose"]` mapping soap/prose (Choose from CFG); label + Edit
+   `w300` for `Custom summary instructions` (light input; prefilled). Save persists both
+   (format as the lowercase token), CFG updated live.
+6. The "No preamble, no headings, no bullet points - just the sentences." phrase: keep for
+   prose; for soap replace with `"No preamble and no bullet points."` (labeled lines are
+   now wanted; blanket "no headings" would fight the section labels). Verify existing
+   tests don't assert the removed phrase on default output — adjust ONLY if a test
+   asserted it (report which).
+
+**TDD:** RED then GREEN. New assertions: `HDR_ValidFormat` (3: soap passthrough, prose,
+garbage->soap); LoadSettings (4: format default soap, override prose, custom default "",
+custom override roundtrip); `HDR_FormatClause` prose mode == `HDR_DetailClause(level)`
+exactly (1); builders: default output contains `"Subjective:"` and `"2-4 sentences"` (2),
+`format:="prose"` output lacks `"Subjective:"` and equals the old shape's substring
+behavior (1), `custom:="note all med changes"` appears in the text block, absent when ""
+(2) — spot-check on `BuildSummaryRequestBody`, one presence check on the queue builder
+(1). ~14 new; implementer recounts (165 + ~14), GREEN must match, exit 0. Existing tests
+unmodified unless change 6 forces it (report exactly which and why).
+
+**Checkpoint 9 (John):** default summarize -> labeled Subjective/Physical Exam/
+Assessment & Plan lines, empty sections absent, med-legal items favored; Settings: switch
+to Prose -> old behavior; type a custom instruction -> visibly obeyed on the next summary.
+Then merge + push.
