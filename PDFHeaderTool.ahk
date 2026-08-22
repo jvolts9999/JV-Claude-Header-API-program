@@ -641,7 +641,7 @@ RunSummarize(*) {
     BUSY := true
     savedClip := ""
     try
-        savedClip := RunSummarizeCore()
+        RunSummarizeCore(&savedClip)
     catch as e
         Toast("Error: " e.Message)
     finally {
@@ -652,21 +652,25 @@ RunSummarize(*) {
     }
 }
 
-RunSummarizeCore() {
+; savedClip is an out-param assigned the instant the real clipboard is saved,
+; not a return value - so the caller's restore-in-finally holds even if this
+; function throws partway through (the clipboard has already been captured
+; into the caller's variable by that point, regardless of how this returns).
+RunSummarizeCore(&savedClip) {
     global CFG
     if (CFG.apiKey = "") {
         CFG := LoadSettings()
         if (CFG.apiKey = "") {
             Toast("No API key yet - paste it into Settings and save.")
             ShowSettingsGui()
-            return ""
+            return
         }
     }
     try
         word := ComObjActive("Word.Application")
     catch {
         Toast("Word is not running.")
-        return ""
+        return
     }
     savedClip := ClipboardAll()
     A_Clipboard := ""
@@ -701,28 +705,32 @@ RunSummarizeCore() {
             Toast(t.err)
             return
         }
-        word.Selection.TypeText(t.text)
+        try
+            word.Selection.TypeText(t.text)
+        catch as e {
+            Toast("Word rejected the insert: " e.Message)
+            return
+        }
         Toast("Summary inserted.")
     }
 
-    if (excerpt = "") {
+    if (Trim(excerpt) = "") {
         ; No selection captured - fall back to summarizing the current PDF page.
         g := GrabCurrentPage()
         if !g.ok {
             Toast(g.err)
-            return savedClip
+            return
         }
         b64 := FileToBase64(g.pdfPath)
         try FileDelete(g.pdfPath)
         SummarizeAndInsert(BuildPageSummaryRequestBody(b64, CFG.model), "Summarizing page " g.pageNum "...")
-        return savedClip
+        return
     }
     if (StrLen(excerpt) > 200000) {
         Toast("Selection is too large.")
-        return savedClip
+        return
     }
     SummarizeAndInsert(BuildSummaryRequestBody(excerpt, CFG.model), "Summarizing...")
-    return savedClip
 }
 
 MakeButton() {
