@@ -279,7 +279,7 @@ HDR_FormatClause(format, detail) {
     return "Structure the summary as labeled lines, including a section ONLY when the source documents it (omit empty sections): 'Subjective:' - history and complaints; 'Physical Exam:' - objective findings; 'Assessment & Plan:' - impressions, decisions, and treatment. "
         . "Prioritize findings of potential medical-legal significance: sentinel events, complications, new or missed findings, deviations from expected care, and turning points in the clinical course. "
         . HDR_DetailClause(detail, true) " "
-        . "Plain text only: no markdown, no asterisks or bold markers, and no headings or labels of any kind other than exactly 'Subjective:', 'Physical Exam:', and 'Assessment & Plan:'. "
+        . "Plain text only: no markdown, no asterisks or bold markers, and no headings or labels of any kind other than exactly 'Subjective:', 'Physical Exam:', and 'Assessment & Plan:'."
 }
 
 ; The "no preamble" instruction's wording depends on format: prose still
@@ -1317,7 +1317,7 @@ ShowSettingsGui() {
     formatDDL := SETGUI.AddDropDownList("w160 x+10 yp-2 Choose" formatIdx, formatItems)
 
     SETGUI.AddText("xm y+12", "Custom summary instructions:").SetFont("cWhite")
-    customEdit := SETGUI.AddEdit("w400 x+10 yp-2 r8 Multi VScroll", CFG.customInstructions)
+    customEdit := SETGUI.AddEdit("w400 x+10 yp-2 r8 Multi VScroll WantReturn", CFG.customInstructions)
 
     applyStyleChk := SETGUI.AddCheckbox("xm y+14" (CFG.applyStyle ? " Checked" : ""))
     SETGUI.AddText("x+4 yp", "Apply Heading 1 style").SetFont("cWhite")

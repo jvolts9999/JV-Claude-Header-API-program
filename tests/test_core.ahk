@@ -472,6 +472,7 @@ AssertTrue(InStr(defaultTxt23, "no headings or labels of any kind other than") >
 sReqProse23 := Json.Parse(BuildSummaryRequestBody(excerpt16, "claude-opus-5", "standard", "prose"))
 proseTxt23 := sReqProse23["messages"][1]["content"][1]["text"]
 AssertTrue(InStr(proseTxt23, "no markdown") > 0, "prose summary prompt bans markdown")
+AssertEq(InStr(defaultTxt23, "'.  No"), 0, "no double space after soap clause")
 
 FileAppend((TestFails ? "FAILED " TestFails "/" TestCount : "PASSED " TestCount) " tests`n", "*")
 ExitApp(TestFails)
