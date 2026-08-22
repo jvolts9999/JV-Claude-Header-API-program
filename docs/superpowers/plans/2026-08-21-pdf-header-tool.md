@@ -1477,3 +1477,69 @@ a dark background.
 **Checkpoint 6b (John):** Settings opens dark, no key box anywhere, no overlap; "API
 key..." opens the sub-dialog masked; Show reveals, Hide re-masks; OK+Save persists a key
 change, Cancel discards; everything else unchanged.
+
+### Task 16 (John feature 2026-08-22): Summarize selection
+
+John's rulings: a second floating button `Summarize text` stacked DIRECTLY ABOVE
+`Insert header` (same window, drag/position/context-menu shared); Settings toggle for it;
+shared progress strip below; behavior: select text in the Acrobat PDF, click Summarize -> a
+2-4 sentence chronology-style prose summary (what happened, key findings, plan) is typed
+into Word at the cursor as normal text. Capture = auto-copy (send Ctrl+C to Acrobat).
+Same model setting as headers.
+
+**Files:**
+- Modify: `PDFHeaderTool.ahk`
+- Modify: `tests\test_core.ahk`
+- Modify: `README.md` (short Summarize paragraph incl. the toggle)
+
+**Changes:**
+
+1. Ini/settings: `ShowSummarize=1` in first-run template; LoadSettings field
+   `showSummarize` (bool, default true).
+2. Refactor: tiny helper `ModelWantsFallbacks(model)` (the existing opus/fable prefix
+   test) used by BOTH `BuildRequestBody` and the new summary builder — no behavior change
+   to the header path (existing tests must stay green unmodified).
+3. `BuildSummaryRequestBody(excerpt, model)` -> JSON string: same model/max_tokens 16000/
+   gated `"fallbacks":"default"` shape as headers; single user message, single text block;
+   NO output_config (plain prose reply). Prompt (static): "Summarize the following excerpt
+   from a medical record for a medical-legal chronology. Write 2-4 sentences of plain
+   prose covering what happened, the key findings, and the plan. No preamble, no headings,
+   no bullet points - just the sentences. Excerpt:" then two newlines then the excerpt
+   (both prompt and excerpt through `Json.Escape`).
+4. `ExtractText(responseText)` -> `{ok:true, text}` or `{ok:false, err}`: mirror
+   ExtractFields' guards (parse-catch, error envelope, refusal, max_tokens, no content),
+   concatenate all text blocks, `Trim`; empty after trim -> err "The model returned no text."
+5. `RunSummarize(*)`: shared `BUSY` guard + try/catch/finally (finally: `BUSY := false`,
+   `PROG_Hide()`, clipboard restore). Flow: reload-first no-key check (same as RunInsert,
+   Settings window route); Word pre-flight (`ComObjActive` try) BEFORE any clipboard work;
+   capture: save `ClipboardAll()`, clear clipboard, if Acrobat window exists and not active
+   `WinActivate "ahk_exe Acrobat.exe"` + brief settle, `Send "^c"`, `ClipWait(1)`; empty ->
+   toast "Select text in the PDF first." and return (clipboard restored in finally);
+   guard: selection > 200000 chars -> toast "Selection is too large." and return.
+   `PROG_Show("Summarizing...")` -> `CallClaude(BuildSummaryRequestBody(...), CFG.apiKey,
+   60, onTick)` with the same stepping-pct onTick pattern as headers -> status 0 / non-200 /
+   ExtractText guards with toasts -> `word.Selection.TypeText(summary)` (typed at cursor,
+   current formatting) -> final Toast "Summary inserted." Clipboard ALWAYS restored.
+6. `MakeButton()`: when `CFG.showSummarize`, the window stacks `Summarize text` (w110 h34)
+   ABOVE `Insert header` (same width); Summarize button OnEvent -> RunSummarize. When off:
+   exactly the current single-button window. Drag, saved position, ContextMenu -> Settings
+   unchanged. Progress strip keeps docking under the WINDOW (WinGetPos-based math adapts
+   automatically — verify by reading, no change expected).
+7. Settings GUI: new checkbox (Task 15 dark pattern: unlabeled box + white AddText label)
+   `Show Summarize button` = `CFG.showSummarize`, placed with the show-button checkbox.
+   Save persists `ShowSummarize`, updates CFG, and applies live by destroying and
+   rebuilding the button window (`BTNGUI.Destroy()`, `BTNGUI := ""`, then `MakeButton()`
+   when either show flag warrants; hidden if showButton off).
+
+**TDD (pure parts):** RED then GREEN. New assertions: LoadSettings `showSummarize` default
+true + override 0 (2); `ModelWantsFallbacks` direct true/false (2);
+`BuildSummaryRequestBody` parsed: model passthrough, max_tokens 16000, fallbacks present
+for opus / absent for haiku, prompt contains "2-4 sentences" and the excerpt text, NO
+`output_config` key (6); `ExtractText`: happy path with leading thinking block, refusal,
+error envelope, empty-content (4). Existing header-path tests unmodified. Implementer
+recounts (101 + 14 = 115 expected), GREEN must match, exit 0.
+
+**Checkpoint 7 (John, combined with 6b):** dark Settings + key dialog (Task 15) AND:
+Summarize button appears above Insert header; toggle hides it; select PDF text -> click ->
+progress strip -> 2-4 sentence summary typed at the Word cursor; no-selection click toasts;
+clipboard contents restored afterward. Then merge + push.
