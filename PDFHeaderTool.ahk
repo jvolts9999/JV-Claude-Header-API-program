@@ -332,7 +332,10 @@ LoadSettings(p := "") {
             . "ButtonX=`n"
             . "ButtonY=`n"
             . "HeaderFont=Times New Roman`n"
-            . "HeaderSize=20`n", p, "UTF-16")
+            . "HeaderSize=20`n"
+            . "ApplyHeadingStyle=1`n"
+            . "HeaderBold=0`n"
+            . "LinesBelow=2`n", p, "UTF-16")
     }
     return {path: p, firstRun: firstRun,
         apiKey: Trim(IniRead(p, "Settings", "ApiKey", "")),
@@ -342,7 +345,10 @@ LoadSettings(p := "") {
         btnX: Trim(IniRead(p, "Settings", "ButtonX", "")),
         btnY: Trim(IniRead(p, "Settings", "ButtonY", "")),
         headerFont: Trim(IniRead(p, "Settings", "HeaderFont", "Times New Roman")),
-        headerSize: HDR_ValidSize(Trim(IniRead(p, "Settings", "HeaderSize", "20")))}
+        headerSize: HDR_ValidSize(Trim(IniRead(p, "Settings", "HeaderSize", "20"))),
+        applyStyle: Trim(IniRead(p, "Settings", "ApplyHeadingStyle", "1")) = "1",
+        headerBold: Trim(IniRead(p, "Settings", "HeaderBold", "0")) = "1",
+        linesBelow: HDR_ValidLines(Trim(IniRead(p, "Settings", "LinesBelow", "2")))}
 }
 
 HDR_ValidSize(v) {
@@ -350,6 +356,13 @@ HDR_ValidSize(v) {
         return 20
     v := Integer(v)
     return (v < 6 || v > 72) ? 20 : v
+}
+
+HDR_ValidLines(v) {
+    if (v = "" || !IsInteger(v))
+        return 2
+    v := Integer(v)
+    return (v < 0 || v > 3) ? 2 : v
 }
 
 ModelOptions() {
@@ -406,7 +419,7 @@ GrabCurrentPage() {
 }
 
 ; --- Word --------------------------------------------------------------
-InsertHeader(hdr, fontName := "", fontSize := 0) {
+InsertHeader(hdr, fontName := "", fontSize := 0, applyStyle := true, bold := false, linesBelow := 0) {
     try
         word := ComObjActive("Word.Application")
     catch
@@ -418,15 +431,29 @@ InsertHeader(hdr, fontName := "", fontSize := 0) {
     try {
         insertAt := word.Selection.Paragraphs.Item(1).Range.Start
         newRng := doc.Range(insertAt, insertAt)
-        newRng.InsertBefore(hdr.text "`r")
+        blankBreaks := ""
+        loop linesBelow
+            blankBreaks .= "`r"
+        newRng.InsertBefore(hdr.text "`r" blankBreaks)
         hdrRng := doc.Range(insertAt, insertAt + StrLen(hdr.text))
-        hdrRng.Style := -2  ; wdStyleHeading1
+        if applyStyle
+            hdrRng.Style := -2  ; wdStyleHeading1
         if (fontName != "" || fontSize > 0) {
             if (fontName != "")
                 hdrRng.Font.Name := fontName
             if (fontSize > 0)
                 hdrRng.Font.Size := fontSize
             hdrRng.Font.Color := 0  ; black - Heading1's theme color would otherwise win
+        }
+        if bold
+            hdrRng.Font.Bold := true
+        if (linesBelow > 0) {
+            ; Blank lines start right after the header's own paragraph mark
+            ; and end (exclusive) where the original following paragraph now
+            ; sits, so that paragraph is never touched or restyled.
+            blankStart := insertAt + StrLen(hdr.text) + 1
+            blankRng := doc.Range(blankStart, blankStart + linesBelow)
+            blankRng.Style := -1  ; wdStyleNormal - blanks never inherit heading style
         }
         for mk in hdr.marks {
             mrng := doc.Range(insertAt + mk.start - 1, insertAt + mk.start - 1 + mk.len)
@@ -510,8 +537,8 @@ RunInsertCore() {
     if (CFG.apiKey = "") {
         CFG := LoadSettings()
         if (CFG.apiKey = "") {
-            Toast("No API key yet. Paste it after ApiKey= in the file that just opened and save - or use the tray menu's Settings window - then press again.")
-            Run('notepad.exe "' CFG.path '"')
+            Toast("No API key yet - paste it into Settings and save.")
+            ShowSettingsGui()
             return
         }
     }
@@ -552,7 +579,7 @@ RunInsertCore() {
     }
     PROG_Set("Inserting...", 95)
     hdr := BuildHeader(f.date, f.provider, f.notetype, !f.imaging)
-    w := InsertHeader(hdr, CFG.headerFont, CFG.headerSize)
+    w := InsertHeader(hdr, CFG.headerFont, CFG.headerSize, CFG.applyStyle, CFG.headerBold, CFG.linesBelow)
     Toast(w.ok ? hdr.text : w.err)
 }
 
@@ -658,10 +685,25 @@ ShowSettingsGui() {
     sizeEdit := SETGUI.AddEdit("w60 x+6 yp-4 Number", CFG.headerSize)
     SETGUI.AddUpDown("Range6-72", CFG.headerSize)
 
+    applyStyleChk := SETGUI.AddCheckbox("xm y+14" (CFG.applyStyle ? " Checked" : ""), "Apply Heading 1 style")
+    boldChk := SETGUI.AddCheckbox("x+20 yp" (CFG.headerBold ? " Checked" : ""), "Bold")
+
+    SETGUI.AddText("xm y+12", "Blank lines below:")
+    linesDDL := SETGUI.AddDropDownList("w60 x+10 yp-2 Choose" (CFG.linesBelow + 1), "0|1|2|3")
+
     showBtnChk := SETGUI.AddCheckbox("xm y+14" (CFG.showButton ? " Checked" : ""), "Show floating button")
 
     SETGUI.AddText("xm y+12", "API key:")
     apiKeyEdit := SETGUI.AddEdit("w300 x+10 yp-2 Password", CFG.apiKey)
+    keyShowing := false
+    showKeyBtn := SETGUI.AddButton("w50 x+6 yp-2", "Show")
+    showKeyBtn.OnEvent("Click", SETGUI_ToggleKeyShow)
+    SETGUI_ToggleKeyShow(*) {
+        keyShowing := !keyShowing
+        SendMessage(0x00CC, keyShowing ? 0 : 0x25CF, 0, apiKeyEdit)  ; EM_SETPASSWORDCHAR
+        apiKeyEdit.Redraw()
+        showKeyBtn.Text := keyShowing ? "Hide" : "Show"
+    }
 
     saveBtn := SETGUI.AddButton("xm y+16 w90 Default", "Save")
     cancelBtn := SETGUI.AddButton("x+10 yp w90", "Cancel")
@@ -693,6 +735,9 @@ ShowSettingsGui() {
         newSize := HDR_ValidSize(sizeEdit.Text)
         newApiKey := Trim(apiKeyEdit.Text)
         newShowButton := showBtnChk.Value ? true : false
+        newApplyStyle := applyStyleChk.Value ? true : false
+        newHeaderBold := boldChk.Value ? true : false
+        newLinesBelow := HDR_ValidLines(linesDDL.Value - 1)
 
         if newShowButton {
             if (BTNGUI = "")
@@ -708,6 +753,9 @@ ShowSettingsGui() {
         IniWrite(newSize, CFG.path, "Settings", "HeaderSize")
         IniWrite(newShowButton ? "1" : "0", CFG.path, "Settings", "ShowButton")
         IniWrite(newApiKey, CFG.path, "Settings", "ApiKey")
+        IniWrite(newApplyStyle ? "1" : "0", CFG.path, "Settings", "ApplyHeadingStyle")
+        IniWrite(newHeaderBold ? "1" : "0", CFG.path, "Settings", "HeaderBold")
+        IniWrite(newLinesBelow, CFG.path, "Settings", "LinesBelow")
 
         CFG.hotkey := newHotkey
         CFG.model := newModel
@@ -715,7 +763,12 @@ ShowSettingsGui() {
         CFG.headerSize := newSize
         CFG.showButton := newShowButton
         CFG.apiKey := newApiKey
+        CFG.applyStyle := newApplyStyle
+        CFG.headerBold := newHeaderBold
+        CFG.linesBelow := newLinesBelow
 
+        SendMessage(0x00CC, 0x25CF, 0, apiKeyEdit)  ; always re-mask before close
+        apiKeyEdit.Redraw()
         SETGUI.Destroy()
         SETGUI := ""
     }
@@ -723,6 +776,8 @@ ShowSettingsGui() {
     SETGUI.OnEvent("Close", SETGUI_Cancel)
     SETGUI_Cancel(*) {
         global SETGUI
+        SendMessage(0x00CC, 0x25CF, 0, apiKeyEdit)  ; always re-mask before close
+        apiKeyEdit.Redraw()
         SETGUI.Destroy()
         SETGUI := ""
     }
@@ -735,10 +790,10 @@ Main() {
     CFG := LoadSettings()
     if CFG.firstRun {
         MsgBox("Welcome. A settings file was created at:`n`n" CFG.path
-            . "`n`nNotepad is opening it now - paste your Claude API key directly after ApiKey= and save. "
-            . "For the hotkey, model, or button, use the Settings window instead (tray menu -> Settings, or right-click the floating button).",
+            . "`n`nThe Settings window is opening now - paste your Claude API key there and save. "
+            . "It also covers the hotkey, model, header style, and button.",
             "PDF Header Tool", "Iconi")
-        Run('notepad.exe "' CFG.path '"')
+        ShowSettingsGui()
     }
     if (CFG.hotkey != "") {
         try

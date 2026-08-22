@@ -10,15 +10,18 @@ and study type, no provider.
 ## Run
 
 Double-click `PDFHeaderTool.ahk` (requires AutoHotkey v2). First run creates
-`%APPDATA%\PDFHeaderTool\settings.ini` and opens it - paste your Claude API
-key after `ApiKey=` and save.
+`%APPDATA%\PDFHeaderTool\settings.ini` and opens the Settings window - paste
+your Claude API key there and save. Pressing the hotkey with no key saved yet
+does the same thing: a toast points you at Settings, which opens for you.
 
 ## Settings
 
 Open the Settings window from the tray icon (**Settings**, the first item) or
 by right-clicking the floating button. It covers the hotkey (or turning it
-off), the model, the header font and size, showing or hiding the floating
-button, and the API key. Save applies changes right away - no Reload needed.
+off), the model, the header font and size, whether the header uses Heading 1
+style and bold, how many blank lines follow it, showing or hiding the
+floating button, and the API key (with a Show/Hide toggle to check it). Save
+applies changes right away - no Reload needed.
 
 Settings are stored in `%APPDATA%\PDFHeaderTool\settings.ini`, which stays
 hand-editable if you prefer:
@@ -28,6 +31,9 @@ hand-editable if you prefer:
 - `Model` - default `claude-opus-5`; cheaper alternatives: `claude-sonnet-5` (about 1 cent/press) or `claude-haiku-4-5` (about half a cent/press). Change the line, then Reload from the tray menu.
 - `HeaderFont` - default `Times New Roman`
 - `HeaderSize` - default `20`
+- `ApplyHeadingStyle` - `1` applies Heading 1 style to the header, `0` inserts it as plain text (font settings still apply)
+- `HeaderBold` - `1` forces the header bold, `0` leaves the style's own weight untouched
+- `LinesBelow` - blank lines inserted after the header, `0`-`3`, default `2`
 - `ShowButton` - `1` shows the floating button, `0` hides it
 - `ButtonX`/`ButtonY` - remembered button position (set automatically)
 
