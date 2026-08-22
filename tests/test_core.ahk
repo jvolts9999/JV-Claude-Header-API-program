@@ -265,5 +265,42 @@ AssertEq(pReq["fallbacks"], "default", "page summary req fallbacks present for o
 pReqCheap := Json.Parse(BuildPageSummaryRequestBody("QUJD", "claude-haiku-4-5"))
 AssertEq(pReqCheap.Has("fallbacks") ? 1 : 0, 0, "page summary req fallbacks absent for haiku")
 
+; ---- Task 17: summary font, page queue, summarize hotkey ----
+
+; HDR_ValidSize fallback param
+AssertEq(HDR_ValidSize(""), 20, "validsize fallback param default still 20")
+AssertEq(HDR_ValidSize("", 12), 12, "validsize fallback param explicit 12")
+
+; LoadSettings: summaryFont / summarySize / summarizeHotkey
+sPath17 := A_Temp "\pdfheadertool_settings_t17.ini"
+try FileDelete(sPath17)
+cfg17 := LoadSettings(sPath17)
+AssertEq(cfg17.summaryFont, "Times New Roman", "summary font default name")
+AssertEq(cfg17.summarySize, 12, "summary font default size")
+AssertEq(cfg17.summarizeHotkey, "", "summarize hotkey default empty")
+IniWrite("abc", sPath17, "Settings", "SummarySize")
+cfg17 := LoadSettings(sPath17)
+AssertEq(cfg17.summarySize, 12, "summary font size garbage falls back to 12")
+IniWrite("F9", sPath17, "Settings", "SummarizeHotkey")
+cfg17 := LoadSettings(sPath17)
+AssertEq(cfg17.summarizeHotkey, "F9", "summarize hotkey override read")
+FileDelete(sPath17)
+
+; BuildQueueSummaryRequestBody
+qList := ["QUJD", "REVG", "R0hJ"]
+qReq := Json.Parse(BuildQueueSummaryRequestBody(qList, "claude-opus-5"))
+AssertEq(qReq["messages"][1]["content"].Length, 4, "queue summary req 4 content blocks")
+AssertEq(qReq["messages"][1]["content"][1]["type"], "document", "queue summary req first block is document")
+AssertEq(qReq["messages"][1]["content"][1]["source"]["data"], "QUJD", "queue summary req first doc b64 passthrough")
+AssertEq(qReq["messages"][1]["content"][2]["source"]["data"], "REVG", "queue summary req second doc b64 passthrough")
+AssertEq(qReq["messages"][1]["content"][3]["source"]["data"], "R0hJ", "queue summary req third doc b64 passthrough")
+qPromptTxt := qReq["messages"][1]["content"][4]["text"]
+AssertTrue(InStr(qPromptTxt, "one multi-page note") > 0 && InStr(qPromptTxt, "2-4 sentences") > 0,
+    "queue summary req prompt mentions multi-page and guidance")
+AssertEq(qReq.Has("output_config") ? 1 : 0, 0, "queue summary req has no output_config")
+AssertEq(qReq["fallbacks"], "default", "queue summary req fallbacks present for opus")
+qReqCheap := Json.Parse(BuildQueueSummaryRequestBody(qList, "claude-haiku-4-5"))
+AssertEq(qReqCheap.Has("fallbacks") ? 1 : 0, 0, "queue summary req fallbacks absent for haiku")
+
 FileAppend((TestFails ? "FAILED " TestFails "/" TestCount : "PASSED " TestCount) " tests`n", "*")
 ExitApp(TestFails)

@@ -259,6 +259,21 @@ BuildPageSummaryRequestBody(b64pdf, model) {
         . '{"type":"text","text":"' Json.Escape(prompt) '"}]}]}'
 }
 
+BuildQueueSummaryRequestBody(b64List, model) {
+    static prompt := "These pages are one multi-page note from a medical record, in order. "
+        . "Summarize the note for a medical-legal chronology. "
+        . "Write 2-4 sentences of plain prose covering what happened, the key findings, and the plan. "
+        . "No preamble, no headings, no bullet points - just the sentences."
+    fb := ModelWantsFallbacks(model) ? '"fallbacks":"default",' : ""
+    blocks := ""
+    for b64 in b64List
+        blocks .= '{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"' b64 '"}},'
+    return '{"model":"' Json.Escape(model) '","max_tokens":16000,' fb
+        . '"messages":[{"role":"user","content":['
+        . blocks
+        . '{"type":"text","text":"' Json.Escape(prompt) '"}]}]}'
+}
+
 ExtractFields(responseText) {
     try
         resp := Json.Parse(responseText)
@@ -376,6 +391,7 @@ LoadSettings(p := "") {
         FileAppend("[Settings]`n"
             . "ApiKey=`n"
             . "Hotkey=F8`n"
+            . "SummarizeHotkey=`n"
             . "Model=claude-opus-5`n"
             . "ShowButton=1`n"
             . "ShowSummarize=1`n"
@@ -385,11 +401,14 @@ LoadSettings(p := "") {
             . "HeaderSize=20`n"
             . "ApplyHeadingStyle=1`n"
             . "HeaderBold=0`n"
-            . "LinesBelow=2`n", p, "UTF-16")
+            . "LinesBelow=2`n"
+            . "SummaryFont=Times New Roman`n"
+            . "SummarySize=12`n", p, "UTF-16")
     }
     return {path: p, firstRun: firstRun,
         apiKey: Trim(IniRead(p, "Settings", "ApiKey", "")),
         hotkey: Trim(IniRead(p, "Settings", "Hotkey", "F8")),
+        summarizeHotkey: Trim(IniRead(p, "Settings", "SummarizeHotkey", "")),
         model: Trim(IniRead(p, "Settings", "Model", "claude-opus-5")),
         showButton: Trim(IniRead(p, "Settings", "ShowButton", "1")) = "1",
         showSummarize: Trim(IniRead(p, "Settings", "ShowSummarize", "1")) = "1",
@@ -399,14 +418,16 @@ LoadSettings(p := "") {
         headerSize: HDR_ValidSize(Trim(IniRead(p, "Settings", "HeaderSize", "20"))),
         applyStyle: Trim(IniRead(p, "Settings", "ApplyHeadingStyle", "1")) = "1",
         headerBold: Trim(IniRead(p, "Settings", "HeaderBold", "0")) = "1",
-        linesBelow: HDR_ValidLines(Trim(IniRead(p, "Settings", "LinesBelow", "2")))}
+        linesBelow: HDR_ValidLines(Trim(IniRead(p, "Settings", "LinesBelow", "2"))),
+        summaryFont: Trim(IniRead(p, "Settings", "SummaryFont", "Times New Roman")),
+        summarySize: HDR_ValidSize(Trim(IniRead(p, "Settings", "SummarySize", "12")), 12)}
 }
 
-HDR_ValidSize(v) {
+HDR_ValidSize(v, fallback := 20) {
     if (v = "" || !IsInteger(v))
-        return 20
+        return fallback
     v := Integer(v)
-    return (v < 6 || v > 72) ? 20 : v
+    return (v < 6 || v > 72) ? fallback : v
 }
 
 HDR_ValidLines(v) {
@@ -516,6 +537,32 @@ InsertHeader(hdr, fontName := "", fontSize := 0, applyStyle := true, bold := fal
     }
 }
 
+InsertSummary(text, fontName := "", fontSize := 0) {
+    try
+        word := ComObjActive("Word.Application")
+    catch
+        return {ok: false, err: "Word is not running."}
+    try
+        doc := word.ActiveDocument
+    catch
+        return {ok: false, err: "No document is open in Word."}
+    try {
+        at := word.Selection.Range.Start
+        doc.Range(at, at).InsertBefore(text)
+        rng := doc.Range(at, at + StrLen(text))
+        if (fontName != "" || fontSize > 0) {
+            if (fontName != "")
+                rng.Font.Name := fontName
+            if (fontSize > 0)
+                rng.Font.Size := fontSize
+            rng.Font.Color := 0  ; black, matching InsertHeader's font-override convention
+        }
+        return {ok: true}
+    } catch as e {
+        return {ok: false, err: "Word rejected the insert: " e.Message}
+    }
+}
+
 ; --- Pipeline and UI ---------------------------------------------------
 global CFG := ""
 global BUSY := false
@@ -524,6 +571,8 @@ global PROGGUI := ""
 global PROGTEXT := ""
 global PROGBAR := ""
 global SETGUI := ""
+global SUMQUEUE := []
+global QBTN := ""
 
 ; Small floating status window - text + a stepping progress bar, shown
 ; near the mouse. PROG_Show creates the Gui once and reuses it on later runs.
@@ -657,7 +706,7 @@ RunSummarize(*) {
 ; function throws partway through (the clipboard has already been captured
 ; into the caller's variable by that point, regardless of how this returns).
 RunSummarizeCore(&savedClip) {
-    global CFG
+    global CFG, SUMQUEUE
     if (CFG.apiKey = "") {
         CFG := LoadSettings()
         if (CFG.apiKey = "") {
@@ -672,18 +721,11 @@ RunSummarizeCore(&savedClip) {
         Toast("Word is not running.")
         return
     }
-    savedClip := ClipboardAll()
-    A_Clipboard := ""
-    if WinExist("ahk_exe Acrobat.exe") && !WinActive("ahk_exe Acrobat.exe") {
-        WinActivate("ahk_exe Acrobat.exe")
-        Sleep(150)
-    }
-    Send("^c")
-    ClipWait(1)
-    excerpt := A_Clipboard
 
-    ; Shared tail for both the selected-text path and the whole-page fallback:
-    ; ask Claude, handle the same status/ExtractText guards, type the result in.
+    ; Shared tail for the selected-text path, the whole-page fallback, and the
+    ; queue path: ask Claude, handle the same status/ExtractText guards, insert
+    ; the result. Returns true/false so the queue branch below knows whether to
+    ; clear itself (only ever cleared on a confirmed successful insert).
     SummarizeAndInsert(body, progText) {
         PROG_Show(progText)
         pct := 10
@@ -694,25 +736,53 @@ RunSummarizeCore(&savedClip) {
         r := CallClaude(body, CFG.apiKey, 60, Tick)
         if (r.status = 0) {
             Toast(r.err)
-            return
+            return false
         }
         t := ExtractText(r.text)
         if (r.status != 200) {
             Toast(t.ok ? "API error HTTP " r.status : t.err)
-            return
+            return false
         }
         if !t.ok {
             Toast(t.err)
-            return
+            return false
         }
-        try
-            word.Selection.TypeText(t.text)
-        catch as e {
-            Toast("Word rejected the insert: " e.Message)
-            return
+        ins := InsertSummary(t.text, CFG.summaryFont, CFG.summarySize)
+        if !ins.ok {
+            Toast(ins.err)
+            return false
         }
         Toast("Summary inserted.")
+        return true
     }
+
+    ; Queue check comes BEFORE any clipboard capture, so a queued-page summary
+    ; never touches the clipboard: savedClip (the caller's out-param) stays at
+    ; its initial "" and RunSummarize's finally-restore is a no-op.
+    if (SUMQUEUE.Length > 0) {
+        n := SUMQUEUE.Length
+        b64List := []
+        for item in SUMQUEUE
+            b64List.Push(FileToBase64(item.pdfPath))
+        ok := SummarizeAndInsert(BuildQueueSummaryRequestBody(b64List, CFG.model), "Summarizing " n " queued pages...")
+        if ok {
+            for item in SUMQUEUE
+                try FileDelete(item.pdfPath)
+            SUMQUEUE := []
+            SUMQ_UpdateLabel()
+        }
+        return
+    }
+
+    savedClip := ClipboardAll()
+    A_Clipboard := ""
+    if WinExist("ahk_exe Acrobat.exe") && !WinActive("ahk_exe Acrobat.exe") {
+        WinActivate("ahk_exe Acrobat.exe")
+        Sleep(150)
+    }
+    Send("^c")
+    ClipWait(1)
+    excerpt := A_Clipboard
 
     if (Trim(excerpt) = "") {
         ; No selection captured - fall back to summarizing the current PDF page.
@@ -733,21 +803,83 @@ RunSummarizeCore(&savedClip) {
     SummarizeAndInsert(BuildSummaryRequestBody(excerpt, CFG.model), "Summarizing...")
 }
 
+; SUMQUEUE label text lives on the Queue button itself; this is the one place
+; that writes it, called after every push/clear/successful-queue-summary.
+SUMQ_UpdateLabel() {
+    global QBTN, SUMQUEUE
+    if (QBTN = "")
+        return
+    n := SUMQUEUE.Length
+    QBTN.Text := (n > 0) ? "Queue Summary (" n ")" : "Queue Summary"
+}
+
+RunQueue(*) {
+    global BUSY
+    if BUSY
+        return
+    BUSY := true
+    try
+        RunQueueCore()
+    catch as e
+        Toast("Error: " e.Message)
+    finally
+        BUSY := false
+}
+
+RunQueueCore() {
+    global SUMQUEUE
+    if (SUMQUEUE.Length >= 20) {
+        Toast("Queue is full (20 pages).")
+        return
+    }
+    g := GrabCurrentPage()
+    if !g.ok {
+        Toast(g.err)
+        return
+    }
+    idx := SUMQUEUE.Length + 1
+    qPath := A_Temp "\PDFHeaderTool_q" A_TickCount "_" idx ".pdf"
+    try
+        FileCopy(g.pdfPath, qPath, 1)
+    catch as e {
+        Toast("Could not queue the page: " e.Message)
+        try FileDelete(g.pdfPath)
+        return
+    }
+    try FileDelete(g.pdfPath)
+    SUMQUEUE.Push({pdfPath: qPath, pageNum: g.pageNum})
+    SUMQ_UpdateLabel()
+    Toast("Page " g.pageNum " queued (count of " SUMQUEUE.Length ").")
+}
+
+RunQueueClear() {
+    global SUMQUEUE
+    for item in SUMQUEUE
+        try FileDelete(item.pdfPath)
+    SUMQUEUE := []
+    SUMQ_UpdateLabel()
+    Toast("Queue cleared.")
+}
+
 MakeButton() {
-    global CFG, BTNGUI
+    global CFG, BTNGUI, QBTN
     BTNGUI := Gui("+AlwaysOnTop -Caption +ToolWindow", "PDF Header")
     BTNGUI.MarginX := 8
     BTNGUI.MarginY := 8
     BTNGUI.SetFont("s10 bold")
     if CFG.showSummarize {
-        sb := BTNGUI.AddButton("w110 h34", "Summarize text")
+        QBTN := BTNGUI.AddButton("w110 h34", "Queue Summary")
+        QBTN.OnEvent("Click", RunQueue)
+        SUMQ_UpdateLabel()
+        sb := BTNGUI.AddButton("w110 h34 y+8", "Summarize text")
         sb.OnEvent("Click", RunSummarize)
         b := BTNGUI.AddButton("w110 h34 y+8", "Insert header")
     } else {
+        QBTN := ""
         b := BTNGUI.AddButton("w110 h34", "Insert header")
     }
     b.OnEvent("Click", RunInsert)
-    BTNGUI.OnEvent("ContextMenu", (*) => ShowSettingsGui())
+    BTNGUI.OnEvent("ContextMenu", HDR_ButtonContextMenu)
     ; Drag anywhere on the window edge (the margin around the button).
     OnMessage(0x201, HDR_Drag)      ; WM_LBUTTONDOWN
     OnMessage(0x232, HDR_DragEnd)   ; WM_EXITSIZEMOVE
@@ -770,6 +902,17 @@ HDR_DragEnd(wParam, lParam, msg, hwnd) {
     WinGetPos(&x, &y, , , BTNGUI)
     IniWrite(x, CFG.path, "Settings", "ButtonX")
     IniWrite(y, CFG.path, "Settings", "ButtonY")
+}
+
+; Gui-level ContextMenu event: GuiCtrlObj identifies which control (if any)
+; was right-clicked. The Queue button clears the queue; anywhere else opens
+; Settings, same as before this button existed.
+HDR_ButtonContextMenu(GuiObj, GuiCtrlObj, Item, IsRightClick, X, Y) {
+    global QBTN
+    if (QBTN != "" && GuiCtrlObj = QBTN)
+        RunQueueClear()
+    else
+        ShowSettingsGui()
 }
 
 ShowSettingsGui() {
@@ -805,6 +948,19 @@ ShowSettingsGui() {
     noHotkeyChk.OnEvent("Click", SETGUI_ToggleHotkey)
     SETGUI_ToggleHotkey(*) {
         hkCtl.Enabled := !noHotkeyChk.Value
+    }
+
+    SETGUI.AddText("xm y+12", "Summarize hotkey:").SetFont("cWhite")
+    try
+        hkCtl2 := SETGUI.AddHotkey("w150 x+10 yp-2", CFG.summarizeHotkey)
+    catch
+        hkCtl2 := SETGUI.AddHotkey("w150 x+10 yp-2")
+    noHotkeyChk2 := SETGUI.AddCheckbox("x+10 yp+2" (CFG.summarizeHotkey = "" ? " Checked" : ""))
+    SETGUI.AddText("x+4 yp", "No hotkey").SetFont("cWhite")
+    hkCtl2.Enabled := (CFG.summarizeHotkey != "")
+    noHotkeyChk2.OnEvent("Click", SETGUI_ToggleHotkey2)
+    SETGUI_ToggleHotkey2(*) {
+        hkCtl2.Enabled := !noHotkeyChk2.Value
     }
 
     SETGUI.AddText("xm y+12", "Model:").SetFont("cWhite")
@@ -851,6 +1007,24 @@ ShowSettingsGui() {
     sizeEdit := SETGUI.AddEdit("w60 x+6 yp-4 Number", CFG.headerSize)
     SETGUI.AddUpDown("Range6-72", CFG.headerSize)
 
+    SETGUI.AddText("xm y+12", "Summary font:").SetFont("cWhite")
+    sFonts := ["Times New Roman", "Calibri", "Cambria", "Georgia", "Arial", "Book Antiqua"]
+    sFontIdx := 0
+    for i, f in sFonts {
+        if (f = CFG.summaryFont) {
+            sFontIdx := i
+            break
+        }
+    }
+    if (sFontIdx = 0) {
+        sFonts.Push(CFG.summaryFont)
+        sFontIdx := sFonts.Length
+    }
+    sFontCombo := SETGUI.AddComboBox("w200 x+10 yp-2 Choose" sFontIdx, sFonts)
+    SETGUI.AddText("x+10 yp+4", "Size:").SetFont("cWhite")
+    sSizeEdit := SETGUI.AddEdit("w60 x+6 yp-4 Number", CFG.summarySize)
+    SETGUI.AddUpDown("Range6-72", CFG.summarySize)
+
     applyStyleChk := SETGUI.AddCheckbox("xm y+14" (CFG.applyStyle ? " Checked" : ""))
     SETGUI.AddText("x+4 yp", "Apply Heading 1 style").SetFont("cWhite")
     boldChk := SETGUI.AddCheckbox("x+20 yp" (CFG.headerBold ? " Checked" : ""))
@@ -875,12 +1049,22 @@ ShowSettingsGui() {
     cancelBtn := SETGUI.AddButton("x+10 yp w90", "Cancel")
     saveBtn.OnEvent("Click", SETGUI_Save)
     SETGUI_Save(*) {
-        global CFG, SETGUI, BTNGUI
+        global CFG, SETGUI, BTNGUI, QBTN
         newHotkey := ""
         if !noHotkeyChk.Value {
             hkVal := hkCtl.Value
             newHotkey := (hkVal != "") ? hkVal : CFG.hotkey
         }
+        newSummarizeHotkey := ""
+        if !noHotkeyChk2.Value {
+            hkVal2 := hkCtl2.Value
+            newSummarizeHotkey := (hkVal2 != "") ? hkVal2 : CFG.summarizeHotkey
+        }
+        if (newHotkey != "" && newSummarizeHotkey != "" && StrLower(newHotkey) = StrLower(newSummarizeHotkey)) {
+            MsgBox("Both functions cannot share one hotkey.", "PDF Header Tool", "Icon!")
+            return
+        }
+
         oldHotkey := CFG.hotkey
         if (oldHotkey != "")
             try Hotkey(oldHotkey, "Off")
@@ -895,10 +1079,26 @@ ShowSettingsGui() {
             }
         }
 
+        oldSummarizeHotkey := CFG.summarizeHotkey
+        if (oldSummarizeHotkey != "")
+            try Hotkey(oldSummarizeHotkey, "Off")
+        if (newSummarizeHotkey != "") {
+            try {
+                Hotkey(newSummarizeHotkey, RunSummarize, "On")
+            } catch {
+                if (oldSummarizeHotkey != "")
+                    try Hotkey(oldSummarizeHotkey, RunSummarize, "On")
+                MsgBox("'" newSummarizeHotkey "' is not a usable hotkey.", "PDF Header Tool", "Icon!")
+                return
+            }
+        }
+
         selIdx := modelDDL.Value
         newModel := (selIdx >= 1 && selIdx <= mo.Length) ? mo[selIdx].id : CFG.model
         newFont := fontCombo.Text
         newSize := HDR_ValidSize(sizeEdit.Text)
+        newSummaryFont := sFontCombo.Text
+        newSummarySize := HDR_ValidSize(sSizeEdit.Text, 12)
         newApiKey := Trim(pendingApiKey)
         newShowButton := showBtnChk.Value ? true : false
         newShowSummarize := showSummarizeChk.Value ? true : false
@@ -907,9 +1107,12 @@ ShowSettingsGui() {
         newLinesBelow := HDR_ValidLines(linesDDL.Value - 1)
 
         IniWrite(newHotkey, CFG.path, "Settings", "Hotkey")
+        IniWrite(newSummarizeHotkey, CFG.path, "Settings", "SummarizeHotkey")
         IniWrite(newModel, CFG.path, "Settings", "Model")
         IniWrite(newFont, CFG.path, "Settings", "HeaderFont")
         IniWrite(newSize, CFG.path, "Settings", "HeaderSize")
+        IniWrite(newSummaryFont, CFG.path, "Settings", "SummaryFont")
+        IniWrite(newSummarySize, CFG.path, "Settings", "SummarySize")
         IniWrite(newShowButton ? "1" : "0", CFG.path, "Settings", "ShowButton")
         IniWrite(newShowSummarize ? "1" : "0", CFG.path, "Settings", "ShowSummarize")
         IniWrite(newApiKey, CFG.path, "Settings", "ApiKey")
@@ -918,9 +1121,12 @@ ShowSettingsGui() {
         IniWrite(newLinesBelow, CFG.path, "Settings", "LinesBelow")
 
         CFG.hotkey := newHotkey
+        CFG.summarizeHotkey := newSummarizeHotkey
         CFG.model := newModel
         CFG.headerFont := newFont
         CFG.headerSize := newSize
+        CFG.summaryFont := newSummaryFont
+        CFG.summarySize := newSummarySize
         CFG.showButton := newShowButton
         CFG.showSummarize := newShowSummarize
         CFG.apiKey := newApiKey
@@ -930,9 +1136,13 @@ ShowSettingsGui() {
 
         ; Layout (single vs. stacked buttons) depends on CFG.showSummarize, so
         ; the window is always rebuilt from scratch rather than reused/shown.
+        ; QBTN is reset alongside BTNGUI so it never dangles on a destroyed
+        ; control if the button stays hidden (MakeButton would otherwise be
+        ; the only thing that clears it, and it's skipped in that case).
         if (BTNGUI != "") {
             BTNGUI.Destroy()
             BTNGUI := ""
+            QBTN := ""
         }
         if newShowButton
             MakeButton()
@@ -1032,6 +1242,13 @@ Main() {
             Hotkey(CFG.hotkey, RunInsert)
         catch
             MsgBox("The hotkey '" CFG.hotkey "' in settings.ini is not valid. Fix it and reload from the tray menu.",
+                "PDF Header Tool", "Icon!")
+    }
+    if (CFG.summarizeHotkey != "") {
+        try
+            Hotkey(CFG.summarizeHotkey, RunSummarize)
+        catch
+            MsgBox("The hotkey '" CFG.summarizeHotkey "' in settings.ini is not valid. Fix it and reload from the tray menu.",
                 "PDF Header Tool", "Icon!")
     }
     if CFG.showButton
