@@ -1431,3 +1431,49 @@ Implementer recounts the suite total (93 + new), states it, GREEN must match wit
 checked → bold header; 2 blank lines appear below and cursor's paragraph untouched;
 Show/Hide reveals and re-masks the key; with key temporarily blanked in Settings, F8 opens
 the Settings window (not Notepad). Then merge + push.
+
+### Task 15 (John checkpoint-6 feedback): key sub-dialog, layout fix, dark menu
+
+Live checkpoint found: (a) BUG — the API key rendered in PLAINTEXT by default and the edit
+wrapped multi-line, overlapping Save/Cancel (the masked-at-creation state did not hold; the
+EM_SETPASSWORDCHAR init path is suspect — root-cause it, do not just patch symptoms);
+(b) John's rulings: the key box must be GONE from the Settings menu entirely — replaced by
+an "API key..." button that opens a small separate modal dialog; and the Settings menu gets
+a dark background.
+
+**Files:**
+- Modify: `PDFHeaderTool.ahk` (ShowSettingsGui rework + new key sub-dialog function)
+- Modify: `README.md` (one line: API key is set via Settings -> "API key...")
+
+**Requirements:**
+
+1. **Remove the API key row from the Settings window** (label, edit, Show button all gone).
+   In its place, before Save/Cancel: a button `API key...`. The main window never contains
+   the key in any control, visible or hidden.
+2. **Key sub-dialog** (own small Gui, owned by SETGUI, modal-ish: disable SETGUI while
+   open, re-enable on close): single-line masked edit (`Password` option at creation —
+   verify at runtime it renders masked; this exact state failed before), prefilled with the
+   current key; a `Show`/`Hide` toggle (EM_SETPASSWORDCHAR 0 / 0x25CF + redraw — diagnose
+   why the previous init left it unmasked and record the root cause in the report); OK and
+   Cancel. OK stores the trimmed value into a working variable that Settings' Save then
+   persists (Cancel in the main window must still discard it). Always re-mask before the
+   dialog closes. Single-line: fixed `r1`/no wrap — the overlap bug came from a wrapping
+   multi-line edit; the sub-dialog must size itself so nothing can overlap.
+3. **Layout sanity in the main window:** with the key row gone, reflow so Save/Cancel sit
+   last with clean spacing; nothing overlaps at 100% and 125% DPI (state which you could
+   verify).
+4. **Dark background:** `SETGUI.BackColor` dark (suggest `0x2B2B2B`) and light label text.
+   HAZARD: checkbox/radio label colors often ignore font color on dark backgrounds in AHK
+   v2 (classic-theme controls). If checkbox text stays black/unreadable, use unlabeled
+   checkboxes paired with `AddText` labels (which do honor the light font color). Dark
+   title bar via `DwmSetWindowAttribute` attribute 20 (`DllCall("dwmapi\DwmSetWindowAttribute", "ptr", hwnd, "uint", 20, "int*", 1, "uint", 4)`)
+   is a nice-to-have; input controls (Edit/DDL/ComboBox/Buttons) may stay system-light —
+   accepted limitation, told to John. Apply the same dark treatment to the key sub-dialog.
+5. The model-note Text control and every other existing behavior (hotkey capture, model
+   DDL, font row, style/bold/lines controls, show-button checkbox, live apply, ini
+   persistence) must keep working exactly as before — surgical rework of layout/colors only.
+
+**Tests:** no new unit tests (all GUI); suite must stay `PASSED 101 tests` exit 0.
+**Checkpoint 6b (John):** Settings opens dark, no key box anywhere, no overlap; "API
+key..." opens the sub-dialog masked; Show reveals, Hide re-masks; OK+Save persists a key
+change, Cancel discards; everything else unchanged.
