@@ -284,16 +284,34 @@ FileToBase64(path) {
     return StrGet(out, "UTF-16")
 }
 
-CallClaude(body, apiKey, timeoutSec := 60) {
+CallClaude(body, apiKey, timeoutSec := 60, onTick := "") {
     req := ComObject("WinHttp.WinHttpRequest.5.1")
-    req.Open("POST", "https://api.anthropic.com/v1/messages", false)
-    req.SetTimeouts(15000, 15000, timeoutSec * 1000, timeoutSec * 1000)
-    req.SetRequestHeader("Content-Type", "application/json")
-    req.SetRequestHeader("x-api-key", apiKey)
-    req.SetRequestHeader("anthropic-version", "2023-06-01")
-    if InStr(body, '"fallbacks"')
-        req.SetRequestHeader("anthropic-beta", "server-side-fallback-2026-07-01")
-    req.Send(body)
+    try {
+        req.Open("POST", "https://api.anthropic.com/v1/messages", true)
+        req.SetTimeouts(15000, 15000, timeoutSec * 1000, timeoutSec * 1000)
+        req.SetRequestHeader("Content-Type", "application/json")
+        req.SetRequestHeader("x-api-key", apiKey)
+        req.SetRequestHeader("anthropic-version", "2023-06-01")
+        if InStr(body, '"fallbacks"')
+            req.SetRequestHeader("anthropic-beta", "server-side-fallback-2026-07-01")
+        req.Send(body)
+    } catch as e {
+        return {status: 0, text: "", err: "Could not reach the API: " e.Message}
+    }
+    deadline := A_TickCount + timeoutSec * 1000
+    loop {
+        done := false
+        try
+            done := req.WaitForResponse(1)
+        catch
+            done := false   ; 1s chunk elapsed; response not ready yet
+        if done
+            break
+        if (A_TickCount > deadline)
+            return {status: 0, text: "", err: "Timed out after " timeoutSec " seconds."}
+        if (onTick != "")
+            onTick.Call()
+    }
     return {status: req.Status, text: req.ResponseText}
 }
 
@@ -405,6 +423,42 @@ InsertHeader(hdr, fontName := "", fontSize := 0) {
 global CFG := ""
 global BUSY := false
 global BTNGUI := ""
+global PROGGUI := ""
+global PROGTEXT := ""
+global PROGBAR := ""
+
+; Small floating status window - text + a stepping progress bar, shown
+; near the mouse. PROG_Show creates the Gui once and reuses it on later runs.
+PROG_Show(text) {
+    global PROGGUI, PROGTEXT, PROGBAR
+    if (PROGGUI = "") {
+        PROGGUI := Gui("+AlwaysOnTop -Caption +ToolWindow", "PDF Header Progress")
+        PROGGUI.MarginX := 10
+        PROGGUI.MarginY := 8
+        PROGGUI.SetFont("s9")
+        PROGTEXT := PROGGUI.AddText("w260", text)
+        PROGBAR := PROGGUI.AddProgress("w260 h16", 0)
+    } else {
+        PROGTEXT.Text := text
+        PROGBAR.Value := 0
+    }
+    MouseGetPos(&mx, &my)
+    PROGGUI.Show("x" (mx + 16) " y" (my + 16) " NoActivate")
+}
+
+PROG_Set(text, pct) {
+    global PROGGUI, PROGTEXT, PROGBAR
+    if (PROGGUI = "")
+        return
+    PROGTEXT.Text := text
+    PROGBAR.Value := pct
+}
+
+PROG_Hide() {
+    global PROGGUI
+    if (PROGGUI != "")
+        PROGGUI.Hide()
+}
 
 RunInsert(*) {
     global BUSY
@@ -415,8 +469,10 @@ RunInsert(*) {
         RunInsertCore()
     catch as e
         Toast("Error: " e.Message)
-    finally
+    finally {
         BUSY := false
+        PROG_Hide()
+    }
 }
 
 RunInsertCore() {
@@ -426,15 +482,26 @@ RunInsertCore() {
         Run('notepad.exe "' CFG.path '"')
         return
     }
+    PROG_Show("Reading page...")
     g := GrabCurrentPage()
     if !g.ok {
         Toast(g.err)
         return
     }
-    Toast("Reading page " g.pageNum "...")
     b64 := FileToBase64(g.pdfPath)
     try FileDelete(g.pdfPath)
-    r := CallClaude(BuildRequestBody(b64, CFG.model), CFG.apiKey)
+    askMsg := "Asking Claude (page " g.pageNum ")..."
+    PROG_Set(askMsg, 10)
+    pct := 10
+    TickAsk() {
+        pct := Min(pct + 10, 90)
+        PROG_Set(askMsg, pct)
+    }
+    r := CallClaude(BuildRequestBody(b64, CFG.model), CFG.apiKey, , TickAsk)
+    if (r.status = 0) {
+        Toast(r.err)
+        return
+    }
     f := ExtractFields(r.text)
     if (r.status != 200) {
         Toast(f.ok ? "API error HTTP " r.status : f.err)
@@ -444,6 +511,7 @@ RunInsertCore() {
         Toast(f.err)
         return
     }
+    PROG_Set("Inserting...", 95)
     hdr := BuildHeader(f.date, f.provider, f.notetype)
     w := InsertHeader(hdr, CFG.headerFont, CFG.headerSize)
     Toast(w.ok ? hdr.text : w.err)
