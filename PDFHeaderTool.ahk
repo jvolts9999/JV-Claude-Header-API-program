@@ -469,7 +469,8 @@ LoadSettings(p := "") {
             . "SummaryFont=Times New Roman`n"
             . "SummarySize=12`n"
             . "SummaryDetail=standard`n"
-            . "Beep=1`n", p, "UTF-16")
+            . "Beep=1`n"
+            . "ComboInsert=1`n", p, "UTF-16")
     }
     return {path: p, firstRun: firstRun,
         apiKey: Trim(IniRead(p, "Settings", "ApiKey", "")),
@@ -489,7 +490,8 @@ LoadSettings(p := "") {
         summaryFont: Trim(IniRead(p, "Settings", "SummaryFont", "Times New Roman")),
         summarySize: HDR_ValidSize(Trim(IniRead(p, "Settings", "SummarySize", "12")), 12),
         summaryDetail: HDR_ValidDetail(Trim(IniRead(p, "Settings", "SummaryDetail", "standard"))),
-        beep: Trim(IniRead(p, "Settings", "Beep", "1")) = "1"}
+        beep: Trim(IniRead(p, "Settings", "Beep", "1")) = "1",
+        comboInsert: Trim(IniRead(p, "Settings", "ComboInsert", "1")) = "1"}
 }
 
 ; Canonicalizes a SummaryDetail ini value to lowercase concise/standard/detailed;
@@ -745,7 +747,7 @@ RunInsertCore() {
         if (CFG.apiKey = "") {
             Toast("No API key yet - paste it into Settings and save.")
             ShowSettingsGui()
-            return
+            return false
         }
     }
     ; A non-empty queue takes priority over Acrobat's current page: the FIRST
@@ -762,7 +764,7 @@ RunInsertCore() {
         if !g.ok {
             Toast(g.err)
             HDR_Chime(false)
-            return
+            return false
         }
         b64 := FileToBase64(g.pdfPath)
         try FileDelete(g.pdfPath)
@@ -772,7 +774,7 @@ RunInsertCore() {
         ComObjActive("Word.Application")
     catch {
         Toast("Word is not running.")
-        return
+        return false
     }
     askMsg := "Asking Claude (page " pageNum ")..."
     PROG_Set(askMsg, 10)
@@ -785,35 +787,46 @@ RunInsertCore() {
     if (r.status = 0) {
         Toast(r.err)
         HDR_Chime(false)
-        return
+        return false
     }
     f := ExtractFields(r.text)
     if (r.status != 200) {
         Toast(f.ok ? "API error HTTP " r.status : f.err)
         HDR_Chime(false)
-        return
+        return false
     }
     HDR_TrackUsage(r.text)
     if !f.ok {
         Toast(f.err)
         HDR_Chime(false)
-        return
+        return false
     }
     PROG_Set("Inserting...", 95)
     hdr := BuildHeader(f.date, f.provider, f.notetype, !f.imaging)
     w := InsertHeader(hdr, CFG.headerFont, CFG.headerSize, CFG.applyStyle, CFG.headerBold, CFG.linesBelow, CFG.summaryFont, CFG.summarySize)
     Toast(w.ok ? hdr.text : w.err)
     HDR_Chime(w.ok)
+    if !w.ok
+        return false
+    return true
 }
 
 RunSummarize(*) {
-    global BUSY
+    global BUSY, CFG
     if BUSY
         return
     BUSY := true
     savedClip := ""
-    try
+    try {
+        ; One-press combo (default on, Settings-toggleable): the header phase
+        ; runs first and must actually succeed (RunInsertCore's true/false
+        ; return) before the summary phase is allowed to run. A false stop
+        ; here is silent by design - the header phase already toasted/chimed
+        ; its own failure, so nothing more is said.
+        if (CFG.comboInsert && !RunInsertCore())
+            return
         RunSummarizeCore(&savedClip)
+    }
     catch as e
         Toast("Error: " e.Message)
     finally {
@@ -1198,6 +1211,9 @@ ShowSettingsGui() {
     showSummarizeChk := SETGUI.AddCheckbox("x+20 yp" (CFG.showSummarize ? " Checked" : ""))
     SETGUI.AddText("x+4 yp", "Show Summarize button").SetFont("cWhite")
 
+    comboChk := SETGUI.AddCheckbox("xm y+14" (CFG.comboInsert ? " Checked" : ""))
+    SETGUI.AddText("x+4 yp", "One press: header + summary").SetFont("cWhite")
+
     beepChk := SETGUI.AddCheckbox("xm y+14" (CFG.beep ? " Checked" : ""))
     SETGUI.AddText("x+4 yp", "Completion beep").SetFont("cWhite")
 
@@ -1291,6 +1307,7 @@ ShowSettingsGui() {
         newHeaderBold := boldChk.Value ? true : false
         newLinesBelow := HDR_ValidLines(linesDDL.Value - 1)
         newBeep := beepChk.Value ? true : false
+        newComboInsert := comboChk.Value ? true : false
 
         IniWrite(newHotkey, CFG.path, "Settings", "Hotkey")
         IniWrite(newSummarizeHotkey, CFG.path, "Settings", "SummarizeHotkey")
@@ -1308,6 +1325,7 @@ ShowSettingsGui() {
         IniWrite(newHeaderBold ? "1" : "0", CFG.path, "Settings", "HeaderBold")
         IniWrite(newLinesBelow, CFG.path, "Settings", "LinesBelow")
         IniWrite(newBeep ? "1" : "0", CFG.path, "Settings", "Beep")
+        IniWrite(newComboInsert ? "1" : "0", CFG.path, "Settings", "ComboInsert")
 
         CFG.hotkey := newHotkey
         CFG.summarizeHotkey := newSummarizeHotkey
@@ -1325,6 +1343,7 @@ ShowSettingsGui() {
         CFG.headerBold := newHeaderBold
         CFG.linesBelow := newLinesBelow
         CFG.beep := newBeep
+        CFG.comboInsert := newComboInsert
 
         ; Layout (single vs. stacked buttons) depends on CFG.showSummarize, so
         ; the window is always rebuilt from scratch rather than reused/shown.

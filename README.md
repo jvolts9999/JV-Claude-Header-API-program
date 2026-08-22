@@ -19,6 +19,13 @@ in its own font and size (separate from the header font), configurable in
 Settings. Toggle the Summarize button off in Settings (**Show Summarize
 button**) if you only want the single header button.
 
+By default, clicking **Summarize text** (or its hotkey) first inserts the
+header, then the summary below it - one press for the whole entry. Turn this
+off in Settings (**One press: header + summary**) to run the two
+independently, as before. If the header phase fails, the combo stops there -
+no summary is attempted. **Insert header** is always header-only, regardless
+of this toggle.
+
 A third button, **Queue Summary**, sits above Summarize text (shown together,
 hidden together). Click it to queue the current PDF page - the label updates
 to show the count, e.g. `Queue Summary (3)`. With pages queued, clicking
@@ -56,8 +63,8 @@ turning it off), a second optional hotkey for Summarize text, a third
 optional hotkey for Queue Summary, the model, the header font and size, the
 summary font and size, the summary detail level (Concise/Standard/Detailed),
 whether the header uses Heading 1 style and bold, how many blank lines follow
-it, showing or hiding the floating button and the Summarize/Queue buttons, and
-the completion beep. No two of the three
+it, showing or hiding the floating button and the Summarize/Queue buttons, the
+one-press header+summary combo, and the completion beep. No two of the three
 hotkeys can be set to the same key. The API key is set via Settings ->
 **API key...**, which
 opens its own small dialog (with a Show/Hide toggle to check it). Save
@@ -81,6 +88,7 @@ hand-editable if you prefer:
 - `SummaryDetail` - `concise`, `standard` (default), or `detailed` - how many sentences the three summary prompts ask for; anything else falls back to `standard`
 - `ShowButton` - `1` shows the floating button, `0` hides it
 - `ShowSummarize` - `1` shows the Summarize text and Queue Summary buttons above it, `0` hides both
+- `ComboInsert` - `1` (default) makes Summarize text insert the header first, then the summary below it; `0` runs the two independently
 - `Beep` - `1` plays a completion chime (ascending on success, descending on failure) after each header or summary insert, `0` disables it
 - `ButtonX`/`ButtonY` - remembered button position (set automatically)
 

@@ -370,5 +370,17 @@ qReqConcise := Json.Parse(BuildQueueSummaryRequestBody(qList, "claude-opus-5", "
 AssertTrue(InStr(qReqConcise["messages"][1]["content"][4]["text"], "1-2 sentences") > 0,
     "queue summary req concise detail shortens prompt")
 
+; ---- Task 20: one-press header + summary combo ----
+
+; LoadSettings: comboInsert
+sPath20 := A_Temp "\pdfheadertool_settings_t20.ini"
+try FileDelete(sPath20)
+cfg20 := LoadSettings(sPath20)
+AssertEq(cfg20.comboInsert ? 1 : 0, 1, "combo insert default on")
+IniWrite("0", sPath20, "Settings", "ComboInsert")
+cfg20 := LoadSettings(sPath20)
+AssertEq(cfg20.comboInsert ? 1 : 0, 0, "combo insert override off")
+FileDelete(sPath20)
+
 FileAppend((TestFails ? "FAILED " TestFails "/" TestCount : "PASSED " TestCount) " tests`n", "*")
 ExitApp(TestFails)
