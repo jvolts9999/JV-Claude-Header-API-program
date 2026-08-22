@@ -326,6 +326,35 @@ Toast(msg, ms := 2600) {
     SetTimer(() => ToolTip(), -ms)
 }
 
+; --- Acrobat -----------------------------------------------------------
+GrabCurrentPage() {
+    if !WinExist("ahk_exe Acrobat.exe")
+        return {ok: false, err: "Acrobat is not running."}
+    try
+        app := ComObject("AcroExch.App")
+    catch
+        return {ok: false, err: "Could not talk to Acrobat."}
+    avdoc := app.GetActiveDoc()
+    if !IsObject(avdoc)
+        return {ok: false, err: "No PDF is open in Acrobat."}
+    pageNum := avdoc.GetAVPageView().GetPageNum()  ; 0-based
+    srcPD := avdoc.GetPDDoc()
+    docName := srcPD.GetFileName()
+    tmp := A_Temp "\PDFHeaderTool_page.pdf"
+    try FileDelete(tmp)
+    newPD := ComObject("AcroExch.PDDoc")
+    newPD.Create()
+    if !newPD.InsertPages(-1, srcPD, pageNum, 1, 0) {
+        newPD.Close()
+        return {ok: false, err: "Could not extract the page."}
+    }
+    saved := newPD.Save(1, tmp)  ; 1 = PDSaveFull
+    newPD.Close()
+    if !saved
+        return {ok: false, err: "Could not save the extracted page."}
+    return {ok: true, pdfPath: tmp, pageNum: pageNum + 1, docName: docName}
+}
+
 ; --- Startup (guarded so tests can #Include this file) ----------------
 Main() {
     ; Filled in by later tasks.
