@@ -193,28 +193,22 @@ HDR_FmtDate(mo, d, y) {
 
 BuildHeader(dateRaw, provider, noteType, includeProvider := true) {
     sep := " " Chr(0x2014) " "
-    marks := []
     d := NormalizeDateMDY(dateRaw)
-    if (d = "") {
+    if (d = "")
         d := "MM/DD/YYYY"
-        marks.Push({start: 1, len: StrLen(d)})
-    }
-    text := d sep
+    parts := [d]
     if includeProvider {
         p := Trim(provider)
-        if (p = "") {
-            p := "PROVIDER"
-            marks.Push({start: StrLen(text) + 1, len: StrLen(p)})
-        }
-        text .= p sep
+        if (p != "")
+            parts.Push(p)
     }
     n := Trim(noteType)
-    if (n = "") {
-        n := "NOTE TYPE"
-        marks.Push({start: StrLen(text) + 1, len: StrLen(n)})
-    }
-    text .= n
-    return {text: text, marks: marks}
+    if (n != "")
+        parts.Push(n)
+    text := ""
+    for i, part in parts
+        text .= (i = 1 ? "" : sep) part
+    return {text: text, marks: []}
 }
 
 ; --- Claude API --------------------------------------------------------

@@ -2,7 +2,8 @@
 
 One keypress (F8) or one click while reading a medical-record PDF in Acrobat
 Pro inserts a `MM/DD/YYYY — Provider — Note Type` Heading 1 at the Word
-cursor. Fields the AI cannot read arrive as yellow-highlighted placeholders.
+cursor. A missing date is inserted as plain MM/DD/YYYY; other missing fields
+are simply omitted.
 Imaging study reports (MRI, CT, X-ray, etc.) insert a two-part header - date
 and study type, no provider.
 
