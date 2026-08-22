@@ -523,6 +523,7 @@ LoadSettings(p := "") {
             . "SummaryFormat=soap`n"
             . "CustomInstructions=`n"
             . "Beep=1`n"
+            . "SoundScheme=wispr2`n"
             . "ComboInsert=1`n", p, "UTF-16")
     }
     return {path: p, firstRun: firstRun,
@@ -546,6 +547,7 @@ LoadSettings(p := "") {
         summaryFormat: HDR_ValidFormat(Trim(IniRead(p, "Settings", "SummaryFormat", "soap"))),
         customInstructions: HDR_DecodeMultiline(Trim(IniRead(p, "Settings", "CustomInstructions", ""))),
         beep: Trim(IniRead(p, "Settings", "Beep", "1")) = "1",
+        soundScheme: HDR_ValidScheme(Trim(IniRead(p, "Settings", "SoundScheme", "wispr2"))),
         comboInsert: Trim(IniRead(p, "Settings", "ComboInsert", "1")) = "1"}
 }
 
@@ -561,6 +563,13 @@ HDR_ValidDetail(v) {
 HDR_ValidFormat(v) {
     lv := StrLower(Trim(v))
     return (lv = "prose") ? "prose" : "soap"
+}
+
+; Canonicalizes a SoundScheme ini value to lowercase wispr2/wispr1/dictstop/beep;
+; anything else (garbage, blank, wrong case) falls back to wispr2.
+HDR_ValidScheme(v) {
+    lv := StrLower(Trim(v))
+    return (lv = "wispr2" || lv = "wispr1" || lv = "dictstop" || lv = "beep") ? lv : "wispr2"
 }
 
 HDR_ValidSize(v, fallback := 20) {
@@ -618,11 +627,106 @@ Toast(msg, ms := 2600) {
     SetTimer(() => ToolTip(), -ms)
 }
 
+; RELATIVE paths (joined onto HDR_WisprSoundsDir()'s result) for the two
+; sounds a given scheme needs. scheme is expected already-clamped (LoadSettings
+; runs everything through HDR_ValidScheme first) - an unrecognized token falls
+; to the same empty map as "beep", which is the safe/silent-fallback case in
+; both HDR_EnsureSounds and HDR_Chime. Pure/unit-testable.
+HDR_SchemeFiles(scheme) {
+    switch scheme {
+        case "wispr2":
+            return Map("success", "notifv2\success.wav", "error", "notifv2\error.wav")
+        case "wispr1":
+            return Map("success", "notifv1\success.wav", "error", "notifv1\error.wav")
+        case "dictstop":
+            return Map("success", "dictation-stop.wav", "error", "notifv1\error.wav")
+        default:
+            return Map()
+    }
+}
+
+; Wispr Flow installs its sounds under a per-version folder; scans
+; %LOCALAPPDATA%\WisprFlow\app-* and returns the LEXICALLY LAST match's
+; resources\assets\sounds path (every version Wispr has shipped so far is the
+; same digit width, so lexical order matches release order) - "" if WisprFlow
+; isn't installed or has no app-* folder at all.
+HDR_WisprSoundsDir() {
+    base := EnvGet("LOCALAPPDATA") "\WisprFlow"
+    best := ""
+    loop files, base "\app-*", "D" {
+        ; StrCompare, not the > operator: app-N.N.NNN folder names aren't
+        ; numeric, and AHK v2's relational operators require numeric operands
+        ; (throwing TypeError otherwise) - only StrCompare does an actual
+        ; lexical/ordinal string comparison.
+        if (StrCompare(A_LoopFileName, best) > 0)
+            best := A_LoopFileName
+    }
+    return (best = "") ? "" : base "\" best "\resources\assets\sounds"
+}
+
+; Ensures the two local cache copies for a non-beep scheme exist under
+; %APPDATA%\PDFHeaderTool\sounds\, copying from the live Wispr install only
+; the first time (overwrite-if-missing only) so a later Wispr update/uninstall
+; can't break a scheme that's already cached. Returns a Map of local paths
+; (same success/error keys as HDR_SchemeFiles) or an empty Map on ANY failure
+; (beep scheme, Wispr not installed, source file missing, copy failed) -
+; callers treat an empty/missing-key Map as "fall back to the two-tone beep,"
+; never as an error.
+HDR_EnsureSounds(scheme) {
+    files := HDR_SchemeFiles(scheme)
+    if (files.Count = 0)
+        return Map()
+    wisprDir := HDR_WisprSoundsDir()
+    if (wisprDir = "")
+        return Map()
+    cacheDir := A_AppData "\PDFHeaderTool\sounds"
+    try
+        DirCreate(cacheDir)
+    catch
+        return Map()
+    out := Map()
+    for kind, relPath in files {
+        localPath := cacheDir "\" scheme "-" kind ".wav"
+        if !FileExist(localPath) {
+            try
+                FileCopy(wisprDir "\" relPath, localPath, 0)
+            catch
+                return Map()
+        }
+        out[kind] := localPath
+    }
+    return out
+}
+
+; Shared by HDR_Chime and the Settings Test button: tries to play scheme's
+; kind ("success"/"error") via HDR_EnsureSounds + SoundPlay (async - SoundPlay
+; doesn't wait unless told to). Returns true if it actually played, false on
+; ANY failure (beep scheme, not installed, copy failed, SoundPlay itself
+; threw) so the caller can fall through to its own two-tone beep - this path
+; never goes silent and never surfaces an error dialog.
+HDR_PlaySoundFile(scheme, kind) {
+    if (scheme = "beep")
+        return false
+    files := HDR_EnsureSounds(scheme)
+    if !files.Has(kind)
+        return false
+    try {
+        SoundPlay(files[kind])
+        return true
+    } catch {
+        return false
+    }
+}
+
 ; Completion chime for the header/summarize pipelines' outcome points only -
-; a no-op when the user has turned it off in Settings.
+; a no-op when the user has turned it off in Settings. Otherwise tries the
+; Settings-selected sound scheme first; any failure along that path falls
+; through to the original two-tone SoundBeep pair.
 HDR_Chime(ok) {
     global CFG
     if !CFG.beep
+        return
+    if HDR_PlaySoundFile(CFG.soundScheme, ok ? "success" : "error")
         return
     if ok {
         SoundBeep(523, 60)
@@ -1338,6 +1442,27 @@ ShowSettingsGui() {
     beepChk := SETGUI.AddCheckbox("xm y+14" (CFG.beep ? " Checked" : ""))
     SETGUI.AddText("x+4 yp", "Completion beep").SetFont("cWhite")
 
+    SETGUI.AddText("xm y+14", "Sound:").SetFont("cWhite")
+    soundItems := ["Wispr chime v2", "Wispr chime v1", "Wispr dictation stop", "Classic beep"]
+    soundTokens := ["wispr2", "wispr1", "dictstop", "beep"]
+    soundIdx := 1
+    for i, tok in soundTokens {
+        if (tok = CFG.soundScheme) {
+            soundIdx := i
+            break
+        }
+    }
+    soundDDL := SETGUI.AddDropDownList("w180 x+10 yp-2 Choose" soundIdx, soundItems)
+    testSoundBtn := SETGUI.AddButton("x+10 yp-2 w60", "Test")
+    testSoundBtn.OnEvent("Click", SETGUI_TestSound)
+    SETGUI_TestSound(*) {
+        scheme := soundTokens[soundDDL.Value]
+        if HDR_PlaySoundFile(scheme, "success")
+            return
+        SoundBeep(523, 60)
+        SoundBeep(784, 90)
+    }
+
     pendingApiKey := CFG.apiKey
     apiKeyBtn := SETGUI.AddButton("xm y+16 w120", "API key...")
     apiKeyBtn.OnEvent("Click", SETGUI_OpenApiKey)
@@ -1430,6 +1555,7 @@ ShowSettingsGui() {
         newHeaderBold := boldChk.Value ? true : false
         newLinesBelow := HDR_ValidLines(linesDDL.Value - 1)
         newBeep := beepChk.Value ? true : false
+        newSoundScheme := soundTokens[soundDDL.Value]
         newComboInsert := comboChk.Value ? true : false
 
         IniWrite(newHotkey, CFG.path, "Settings", "Hotkey")
@@ -1450,6 +1576,7 @@ ShowSettingsGui() {
         IniWrite(newHeaderBold ? "1" : "0", CFG.path, "Settings", "HeaderBold")
         IniWrite(newLinesBelow, CFG.path, "Settings", "LinesBelow")
         IniWrite(newBeep ? "1" : "0", CFG.path, "Settings", "Beep")
+        IniWrite(newSoundScheme, CFG.path, "Settings", "SoundScheme")
         IniWrite(newComboInsert ? "1" : "0", CFG.path, "Settings", "ComboInsert")
 
         CFG.hotkey := newHotkey
@@ -1470,6 +1597,7 @@ ShowSettingsGui() {
         CFG.headerBold := newHeaderBold
         CFG.linesBelow := newLinesBelow
         CFG.beep := newBeep
+        CFG.soundScheme := newSoundScheme
         CFG.comboInsert := newComboInsert
 
         ; Layout (single vs. stacked buttons) depends on CFG.showSummarize, so
@@ -1485,8 +1613,29 @@ ShowSettingsGui() {
         if newShowButton
             MakeButton()
 
-        SETGUI.Destroy()
-        SETGUI := ""
+        ; Stay open on Save (John, Task 24): apply + persist everything above
+        ; exactly as before, then give in-place feedback instead of closing -
+        ; flip the Save button to "Saved" and disable it for ~1200ms via a
+        ; one-shot SetTimer that restores it. Controls are left holding
+        ; whatever the user just saved (no rebuild/reload). SETGUI_Cancel (the
+        ; only other path, including the X) is the sole way to close the
+        ; window now, so the flash-restore timer can fire AFTER that has
+        ; already happened - SETGUI_SaveFlashDone checks the global SETGUI
+        ; (nulled by SETGUI_Cancel) before touching saveBtn, so a stale timer
+        ; from a save right before Cancel is a harmless no-op, never an error
+        ; on a destroyed control.
+        SETGUI_SaveFlashDone() {
+            global SETGUI
+            if (SETGUI = "")
+                return
+            try {
+                saveBtn.Text := "Save"
+                saveBtn.Enabled := true
+            }
+        }
+        saveBtn.Text := "Saved"
+        saveBtn.Enabled := false
+        SetTimer(SETGUI_SaveFlashDone, -1200)
     }
     cancelBtn.OnEvent("Click", SETGUI_Cancel)
     SETGUI.OnEvent("Close", SETGUI_Cancel)

@@ -49,10 +49,18 @@ summary; a failed attempt keeps the queue so you can retry. Right-click the
 Queue button to clear it manually. The queue is session-only (not saved
 between runs).
 
-A short two-tone chime plays when a header or summary insert finishes - an
-ascending pair of notes on success, a descending pair on failure - so you get
-feedback without having to look at the screen. Turn it off in Settings
-(**Completion beep**). The tray
+A completion sound plays when a header or summary insert finishes, so you get
+feedback without having to look at the screen. By default it's Wispr Flow's
+own chime (the "v2" success/error sound, cached locally under
+`%APPDATA%\PDFHeaderTool\sounds\` the first time it's needed, so a later Wispr
+update or uninstall can't break it). Pick a different sound in Settings
+(**Sound**): Wispr's older "v1" chime, Wispr's dictation-stop sound, or the
+original two-tone beep (ascending notes on success, descending on failure); a
+**Test** button beside the picker plays the selected option's success sound
+without saving, so you can choose by ear. If Wispr Flow isn't installed, or
+anything about a Wispr sound fails, it falls back to the two-tone beep
+automatically - you always get a sound, never an error dialog. Turn sound off
+entirely in Settings (**Completion beep**). The tray
 icon's tooltip tracks calls made and an estimated cost for the session, e.g.
 "PDF Header Tool - 12 calls, ~8.4 cents this session" (the cost is a rough
 estimate from Anthropic's published per-token pricing, not a billing figure,
@@ -77,11 +85,14 @@ the summary format (Sectioned (SOAP), the default, or Prose) and custom
 summary instructions, whether the header uses Heading 1 style and bold, how
 many blank lines follow
 it, showing or hiding the floating button and the Summarize/Queue buttons, the
-one-press header+summary combo, and the completion beep. No two of the three
+one-press header+summary combo, the completion beep, and which sound it
+plays. No two of the three
 hotkeys can be set to the same key. The API key is set via Settings ->
 **API key...**, which
 opens its own small dialog (with a Show/Hide toggle to check it). Save
-applies changes right away - no Reload needed.
+applies changes right away - no Reload needed - and the window stays open
+so you can keep adjusting settings (the Save button briefly shows "Saved");
+Cancel or the X is what closes it.
 
 Settings are stored in `%APPDATA%\PDFHeaderTool\settings.ini`, which stays
 hand-editable if you prefer:
@@ -104,7 +115,8 @@ hand-editable if you prefer:
 - `ShowButton` - `1` shows the floating button, `0` hides it
 - `ShowSummarize` - `1` shows the Summarize text and Queue Summary buttons above it, `0` hides both
 - `ComboInsert` - `1` (default) makes Summarize text insert the header first, then the summary below it; `0` runs the two independently
-- `Beep` - `1` plays a completion chime (ascending on success, descending on failure) after each header or summary insert, `0` disables it
+- `Beep` - `1` plays the completion sound chosen by `SoundScheme` after each header or summary insert, `0` disables it entirely
+- `SoundScheme` - which completion sound: `wispr2` (default, Wispr Flow's newer chime), `wispr1` (Wispr's older chime), `dictstop` (Wispr's dictation-stop sound), or `beep` (the original two-tone); anything else falls back to `wispr2`. The three Wispr options are cached under `%APPDATA%\PDFHeaderTool\sounds\` the first time each is used, and fall back to the two-tone beep automatically if Wispr Flow isn't installed or a cache copy can't be made - no error shown either way
 - `ButtonX`/`ButtonY` - remembered button position (set automatically)
 
 ## Tests

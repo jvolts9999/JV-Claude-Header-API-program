@@ -474,5 +474,35 @@ proseTxt23 := sReqProse23["messages"][1]["content"][1]["text"]
 AssertTrue(InStr(proseTxt23, "no markdown") > 0, "prose summary prompt bans markdown")
 AssertEq(InStr(defaultTxt23, "'.  No"), 0, "no double space after soap clause")
 
+; ---- Task 24: real Wispr sound files + sound picker ----
+
+; HDR_ValidScheme
+AssertEq(HDR_ValidScheme("wispr1"), "wispr1", "validscheme passthrough")
+AssertEq(HDR_ValidScheme("BEEP"), "beep", "validscheme case-insensitive")
+AssertEq(HDR_ValidScheme("garbage"), "wispr2", "validscheme garbage falls back to wispr2")
+
+; LoadSettings: soundScheme
+sPath24 := A_Temp "\pdfheadertool_settings_t24.ini"
+try FileDelete(sPath24)
+cfg24 := LoadSettings(sPath24)
+AssertEq(cfg24.soundScheme, "wispr2", "sound scheme default wispr2")
+IniWrite("wispr1", sPath24, "Settings", "SoundScheme")
+cfg24 := LoadSettings(sPath24)
+AssertEq(cfg24.soundScheme, "wispr1", "sound scheme override read")
+FileDelete(sPath24)
+
+; HDR_SchemeFiles: RELATIVE paths within Wispr's own sounds dir, for all four schemes
+sf2 := HDR_SchemeFiles("wispr2")
+AssertTrue(sf2["success"] = "notifv2\success.wav" && sf2["error"] = "notifv2\error.wav",
+    "schemefiles wispr2 success/error pair")
+sf1 := HDR_SchemeFiles("wispr1")
+AssertTrue(sf1["success"] = "notifv1\success.wav" && sf1["error"] = "notifv1\error.wav",
+    "schemefiles wispr1 success/error pair")
+sfd := HDR_SchemeFiles("dictstop")
+AssertTrue(sfd["success"] = "dictation-stop.wav" && sfd["error"] = "notifv1\error.wav",
+    "schemefiles dictstop success/error pair")
+sfb := HDR_SchemeFiles("beep")
+AssertEq(sfb.Count, 0, "schemefiles beep empty map")
+
 FileAppend((TestFails ? "FAILED " TestFails "/" TestCount : "PASSED " TestCount) " tests`n", "*")
 ExitApp(TestFails)
