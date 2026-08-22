@@ -302,5 +302,36 @@ AssertEq(qReq["fallbacks"], "default", "queue summary req fallbacks present for 
 qReqCheap := Json.Parse(BuildQueueSummaryRequestBody(qList, "claude-haiku-4-5"))
 AssertEq(qReqCheap.Has("fallbacks") ? 1 : 0, 0, "queue summary req fallbacks absent for haiku")
 
+; ---- Task 18: queue hotkey, beep, usage/cost tracking ----
+
+; LoadSettings: queueHotkey / beep
+sPath18 := A_Temp "\pdfheadertool_settings_t18.ini"
+try FileDelete(sPath18)
+cfg18 := LoadSettings(sPath18)
+AssertEq(cfg18.queueHotkey, "", "queue hotkey default empty")
+AssertEq(cfg18.beep ? 1 : 0, 1, "beep default on")
+IniWrite("F10", sPath18, "Settings", "QueueHotkey")
+IniWrite("0", sPath18, "Settings", "Beep")
+cfg18 := LoadSettings(sPath18)
+AssertEq(cfg18.queueHotkey, "F10", "queue hotkey override read")
+AssertEq(cfg18.beep ? 1 : 0, 0, "beep override off")
+FileDelete(sPath18)
+
+; ExtractUsage
+uOk := '{"stop_reason":"end_turn","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1234,"output_tokens":56}}'
+u := ExtractUsage(uOk)
+AssertEq(u.inTok, 1234, "extractusage input tokens")
+AssertEq(u.outTok, 56, "extractusage output tokens")
+uMissing := '{"stop_reason":"end_turn","content":[{"type":"text","text":"hi"}]}'
+u2 := ExtractUsage(uMissing)
+AssertEq(u2.inTok, 0, "extractusage missing usage input zero")
+AssertEq(u2.outTok, 0, "extractusage missing usage output zero")
+
+; EstimateCents
+AssertEq(EstimateCents("claude-opus-5", 1000, 1000), 3.0, "estimatecents opus math")
+AssertEq(EstimateCents("claude-sonnet-5", 1000, 1000), 1.8, "estimatecents sonnet math")
+AssertEq(EstimateCents("claude-haiku-4-5", 1000, 1000), 0.6, "estimatecents haiku math")
+AssertEq(EstimateCents("claude-nonexistent", 1000, 1000), -1, "estimatecents unknown model")
+
 FileAppend((TestFails ? "FAILED " TestFails "/" TestCount : "PASSED " TestCount) " tests`n", "*")
 ExitApp(TestFails)

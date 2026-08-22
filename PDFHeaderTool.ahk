@@ -329,6 +329,54 @@ ExtractText(responseText) {
     return {ok: true, text: txt}
 }
 
+; Pulls token counts out of a Claude response envelope's usage block. Missing
+; usage, a missing/non-numeric field, or an unparseable response all fall
+; back to zeros rather than throwing - this is purely informational (session
+; cost estimate), never something that should abort a pipeline.
+ExtractUsage(responseText) {
+    try
+        resp := Json.Parse(responseText)
+    catch
+        return {inTok: 0, outTok: 0}
+    if !(resp is Map) || !resp.Has("usage") || !(resp["usage"] is Map)
+        return {inTok: 0, outTok: 0}
+    u := resp["usage"]
+    inTok := (u.Has("input_tokens") && IsNumber(u["input_tokens"])) ? u["input_tokens"] : 0
+    outTok := (u.Has("output_tokens") && IsNumber(u["output_tokens"])) ? u["output_tokens"] : 0
+    return {inTok: inTok, outTok: outTok}
+}
+
+; Per-MTok USD rates (expressed directly in cents) by model prefix. Unknown
+; model strings return -1 so callers can skip the tooltip's cost clause
+; rather than show a bogus number.
+EstimateCents(model, inTok, outTok) {
+    if (SubStr(model, 1, StrLen("claude-opus-5")) = "claude-opus-5")
+        return (inTok * 500 + outTok * 2500) / 1000000.0
+    if (SubStr(model, 1, StrLen("claude-fable")) = "claude-fable")
+        return (inTok * 1000 + outTok * 5000) / 1000000.0
+    if (SubStr(model, 1, StrLen("claude-sonnet-5")) = "claude-sonnet-5")
+        return (inTok * 300 + outTok * 1500) / 1000000.0
+    if (SubStr(model, 1, StrLen("claude-haiku-4-5")) = "claude-haiku-4-5")
+        return (inTok * 100 + outTok * 500) / 1000000.0
+    return -1
+}
+
+; Called once per HTTP-200 response in either pipeline. Updates the session
+; globals and the tray tooltip; the cost clause is omitted entirely when the
+; model's pricing is unknown, rather than showing a wrong number.
+HDR_TrackUsage(responseText) {
+    global SESSION_CALLS, SESSION_CENTS, CFG
+    SESSION_CALLS++
+    u := ExtractUsage(responseText)
+    cents := EstimateCents(CFG.model, u.inTok, u.outTok)
+    tip := "PDF Header Tool - " SESSION_CALLS " calls"
+    if (cents >= 0) {
+        SESSION_CENTS += cents
+        tip .= ", ~" Format("{:.1f}", SESSION_CENTS) " cents this session"
+    }
+    A_IconTip := tip
+}
+
 HDR_Field(m, k) {
     if !(m is Map) || !m.Has(k)
         return ""
@@ -392,6 +440,7 @@ LoadSettings(p := "") {
             . "ApiKey=`n"
             . "Hotkey=F8`n"
             . "SummarizeHotkey=`n"
+            . "QueueHotkey=`n"
             . "Model=claude-opus-5`n"
             . "ShowButton=1`n"
             . "ShowSummarize=1`n"
@@ -403,12 +452,14 @@ LoadSettings(p := "") {
             . "HeaderBold=0`n"
             . "LinesBelow=2`n"
             . "SummaryFont=Times New Roman`n"
-            . "SummarySize=12`n", p, "UTF-16")
+            . "SummarySize=12`n"
+            . "Beep=1`n", p, "UTF-16")
     }
     return {path: p, firstRun: firstRun,
         apiKey: Trim(IniRead(p, "Settings", "ApiKey", "")),
         hotkey: Trim(IniRead(p, "Settings", "Hotkey", "F8")),
         summarizeHotkey: Trim(IniRead(p, "Settings", "SummarizeHotkey", "")),
+        queueHotkey: Trim(IniRead(p, "Settings", "QueueHotkey", "")),
         model: Trim(IniRead(p, "Settings", "Model", "claude-opus-5")),
         showButton: Trim(IniRead(p, "Settings", "ShowButton", "1")) = "1",
         showSummarize: Trim(IniRead(p, "Settings", "ShowSummarize", "1")) = "1",
@@ -420,7 +471,8 @@ LoadSettings(p := "") {
         headerBold: Trim(IniRead(p, "Settings", "HeaderBold", "0")) = "1",
         linesBelow: HDR_ValidLines(Trim(IniRead(p, "Settings", "LinesBelow", "2"))),
         summaryFont: Trim(IniRead(p, "Settings", "SummaryFont", "Times New Roman")),
-        summarySize: HDR_ValidSize(Trim(IniRead(p, "Settings", "SummarySize", "12")), 12)}
+        summarySize: HDR_ValidSize(Trim(IniRead(p, "Settings", "SummarySize", "12")), 12),
+        beep: Trim(IniRead(p, "Settings", "Beep", "1")) = "1"}
 }
 
 HDR_ValidSize(v, fallback := 20) {
@@ -459,6 +511,18 @@ ModelNoteFor(id) {
 Toast(msg, ms := 2600) {
     ToolTip(msg)
     SetTimer(() => ToolTip(), -ms)
+}
+
+; Completion chime for the header/summarize pipelines' outcome points only -
+; a no-op when the user has turned it off in Settings.
+HDR_Chime(ok) {
+    global CFG
+    if !CFG.beep
+        return
+    if ok
+        SoundBeep(880, 120)
+    else
+        SoundBeep(300, 250)
 }
 
 ; --- Acrobat -----------------------------------------------------------
@@ -573,6 +637,8 @@ global PROGBAR := ""
 global SETGUI := ""
 global SUMQUEUE := []
 global QBTN := ""
+global SESSION_CALLS := 0
+global SESSION_CENTS := 0.0
 
 ; Small floating status window - text + a stepping progress bar, shown
 ; near the mouse. PROG_Show creates the Gui once and reuses it on later runs.
@@ -581,10 +647,12 @@ PROG_Show(text) {
     static stripW := 260, stripInset := 6
     if (PROGGUI = "") {
         PROGGUI := Gui("+AlwaysOnTop -Caption +ToolWindow", "PDF Header Progress")
+        PROGGUI.BackColor := "0x2B2B2B"
         PROGGUI.MarginX := 10
         PROGGUI.MarginY := 8
         PROGGUI.SetFont("s9")
         PROGTEXT := PROGGUI.AddText("w" stripW, text)
+        PROGTEXT.SetFont("cWhite")
         PROGBAR := PROGGUI.AddProgress("w" stripW " h16", 0)
     } else {
         PROGTEXT.Text := text
@@ -633,7 +701,7 @@ RunInsert(*) {
 }
 
 RunInsertCore() {
-    global CFG
+    global CFG, SUMQUEUE
     if (CFG.apiKey = "") {
         CFG := LoadSettings()
         if (CFG.apiKey = "") {
@@ -642,21 +710,33 @@ RunInsertCore() {
             return
         }
     }
-    PROG_Show("Reading page...")
-    g := GrabCurrentPage()
-    if !g.ok {
-        Toast(g.err)
-        return
+    ; A non-empty queue takes priority over Acrobat's current page: the FIRST
+    ; queued entry is read (and NOT deleted - the queue still owns that file,
+    ; needed later for a queued summary run). Empty queue -> unchanged
+    ; GrabCurrentPage path below.
+    if (SUMQUEUE.Length > 0) {
+        pageNum := SUMQUEUE[1].pageNum
+        PROG_Show("Reading queued page " pageNum "...")
+        b64 := FileToBase64(SUMQUEUE[1].pdfPath)
+    } else {
+        PROG_Show("Reading page...")
+        g := GrabCurrentPage()
+        if !g.ok {
+            Toast(g.err)
+            HDR_Chime(false)
+            return
+        }
+        b64 := FileToBase64(g.pdfPath)
+        try FileDelete(g.pdfPath)
+        pageNum := g.pageNum
     }
-    b64 := FileToBase64(g.pdfPath)
-    try FileDelete(g.pdfPath)
     try
         ComObjActive("Word.Application")
     catch {
         Toast("Word is not running.")
         return
     }
-    askMsg := "Asking Claude (page " g.pageNum ")..."
+    askMsg := "Asking Claude (page " pageNum ")..."
     PROG_Set(askMsg, 10)
     pct := 10
     TickAsk() {
@@ -666,21 +746,26 @@ RunInsertCore() {
     r := CallClaude(BuildRequestBody(b64, CFG.model), CFG.apiKey, , TickAsk)
     if (r.status = 0) {
         Toast(r.err)
+        HDR_Chime(false)
         return
     }
     f := ExtractFields(r.text)
     if (r.status != 200) {
         Toast(f.ok ? "API error HTTP " r.status : f.err)
+        HDR_Chime(false)
         return
     }
+    HDR_TrackUsage(r.text)
     if !f.ok {
         Toast(f.err)
+        HDR_Chime(false)
         return
     }
     PROG_Set("Inserting...", 95)
     hdr := BuildHeader(f.date, f.provider, f.notetype, !f.imaging)
     w := InsertHeader(hdr, CFG.headerFont, CFG.headerSize, CFG.applyStyle, CFG.headerBold, CFG.linesBelow)
     Toast(w.ok ? hdr.text : w.err)
+    HDR_Chime(w.ok)
 }
 
 RunSummarize(*) {
@@ -736,23 +821,29 @@ RunSummarizeCore(&savedClip) {
         r := CallClaude(body, CFG.apiKey, 60, Tick)
         if (r.status = 0) {
             Toast(r.err)
+            HDR_Chime(false)
             return false
         }
         t := ExtractText(r.text)
         if (r.status != 200) {
             Toast(t.ok ? "API error HTTP " r.status : t.err)
+            HDR_Chime(false)
             return false
         }
+        HDR_TrackUsage(r.text)
         if !t.ok {
             Toast(t.err)
+            HDR_Chime(false)
             return false
         }
         ins := InsertSummary(t.text, CFG.summaryFont, CFG.summarySize)
         if !ins.ok {
             Toast(ins.err)
+            HDR_Chime(false)
             return false
         }
         Toast("Summary inserted.")
+        HDR_Chime(true)
         return true
     }
 
@@ -789,6 +880,7 @@ RunSummarizeCore(&savedClip) {
         g := GrabCurrentPage()
         if !g.ok {
             Toast(g.err)
+            HDR_Chime(false)
             return
         }
         b64 := FileToBase64(g.pdfPath)
@@ -868,6 +960,7 @@ RunQueueClear() {
 MakeButton() {
     global CFG, BTNGUI, QBTN
     BTNGUI := Gui("+AlwaysOnTop -Caption +ToolWindow", "PDF Header")
+    BTNGUI.BackColor := "0x2B2B2B"
     BTNGUI.MarginX := 8
     BTNGUI.MarginY := 8
     BTNGUI.SetFont("s10 bold")
@@ -967,6 +1060,19 @@ ShowSettingsGui() {
         hkCtl2.Enabled := !noHotkeyChk2.Value
     }
 
+    SETGUI.AddText("xm y+12", "Queue hotkey:").SetFont("cWhite")
+    try
+        hkCtl3 := SETGUI.AddHotkey("w150 x+10 yp-2", CFG.queueHotkey)
+    catch
+        hkCtl3 := SETGUI.AddHotkey("w150 x+10 yp-2")
+    noHotkeyChk3 := SETGUI.AddCheckbox("x+10 yp+2" (CFG.queueHotkey = "" ? " Checked" : ""))
+    SETGUI.AddText("x+4 yp", "No hotkey").SetFont("cWhite")
+    hkCtl3.Enabled := (CFG.queueHotkey != "")
+    noHotkeyChk3.OnEvent("Click", SETGUI_ToggleHotkey3)
+    SETGUI_ToggleHotkey3(*) {
+        hkCtl3.Enabled := !noHotkeyChk3.Value
+    }
+
     SETGUI.AddText("xm y+12", "Model:").SetFont("cWhite")
     labels := []
     for m in mo
@@ -1042,6 +1148,9 @@ ShowSettingsGui() {
     showSummarizeChk := SETGUI.AddCheckbox("x+20 yp" (CFG.showSummarize ? " Checked" : ""))
     SETGUI.AddText("x+4 yp", "Show Summarize button").SetFont("cWhite")
 
+    beepChk := SETGUI.AddCheckbox("xm y+14" (CFG.beep ? " Checked" : ""))
+    SETGUI.AddText("x+4 yp", "Completion beep").SetFont("cWhite")
+
     pendingApiKey := CFG.apiKey
     apiKeyBtn := SETGUI.AddButton("xm y+16 w120", "API key...")
     apiKeyBtn.OnEvent("Click", SETGUI_OpenApiKey)
@@ -1064,8 +1173,15 @@ ShowSettingsGui() {
             hkVal2 := hkCtl2.Value
             newSummarizeHotkey := (hkVal2 != "") ? hkVal2 : CFG.summarizeHotkey
         }
-        if (newHotkey != "" && newSummarizeHotkey != "" && StrLower(newHotkey) = StrLower(newSummarizeHotkey)) {
-            MsgBox("Both functions cannot share one hotkey.", "PDF Header Tool", "Icon!")
+        newQueueHotkey := ""
+        if !noHotkeyChk3.Value {
+            hkVal3 := hkCtl3.Value
+            newQueueHotkey := (hkVal3 != "") ? hkVal3 : CFG.queueHotkey
+        }
+        if ((newHotkey != "" && newSummarizeHotkey != "" && StrLower(newHotkey) = StrLower(newSummarizeHotkey))
+            || (newHotkey != "" && newQueueHotkey != "" && StrLower(newHotkey) = StrLower(newQueueHotkey))
+            || (newSummarizeHotkey != "" && newQueueHotkey != "" && StrLower(newSummarizeHotkey) = StrLower(newQueueHotkey))) {
+            MsgBox("Each function needs its own hotkey.", "PDF Header Tool", "Icon!")
             return
         }
 
@@ -1097,6 +1213,20 @@ ShowSettingsGui() {
             }
         }
 
+        oldQueueHotkey := CFG.queueHotkey
+        if (oldQueueHotkey != "")
+            try Hotkey(oldQueueHotkey, "Off")
+        if (newQueueHotkey != "") {
+            try {
+                Hotkey(newQueueHotkey, RunQueue, "On")
+            } catch {
+                if (oldQueueHotkey != "")
+                    try Hotkey(oldQueueHotkey, RunQueue, "On")
+                MsgBox("'" newQueueHotkey "' is not a usable hotkey.", "PDF Header Tool", "Icon!")
+                return
+            }
+        }
+
         selIdx := modelDDL.Value
         newModel := (selIdx >= 1 && selIdx <= mo.Length) ? mo[selIdx].id : CFG.model
         newFont := fontCombo.Text
@@ -1109,9 +1239,11 @@ ShowSettingsGui() {
         newApplyStyle := applyStyleChk.Value ? true : false
         newHeaderBold := boldChk.Value ? true : false
         newLinesBelow := HDR_ValidLines(linesDDL.Value - 1)
+        newBeep := beepChk.Value ? true : false
 
         IniWrite(newHotkey, CFG.path, "Settings", "Hotkey")
         IniWrite(newSummarizeHotkey, CFG.path, "Settings", "SummarizeHotkey")
+        IniWrite(newQueueHotkey, CFG.path, "Settings", "QueueHotkey")
         IniWrite(newModel, CFG.path, "Settings", "Model")
         IniWrite(newFont, CFG.path, "Settings", "HeaderFont")
         IniWrite(newSize, CFG.path, "Settings", "HeaderSize")
@@ -1123,9 +1255,11 @@ ShowSettingsGui() {
         IniWrite(newApplyStyle ? "1" : "0", CFG.path, "Settings", "ApplyHeadingStyle")
         IniWrite(newHeaderBold ? "1" : "0", CFG.path, "Settings", "HeaderBold")
         IniWrite(newLinesBelow, CFG.path, "Settings", "LinesBelow")
+        IniWrite(newBeep ? "1" : "0", CFG.path, "Settings", "Beep")
 
         CFG.hotkey := newHotkey
         CFG.summarizeHotkey := newSummarizeHotkey
+        CFG.queueHotkey := newQueueHotkey
         CFG.model := newModel
         CFG.headerFont := newFont
         CFG.headerSize := newSize
@@ -1137,6 +1271,7 @@ ShowSettingsGui() {
         CFG.applyStyle := newApplyStyle
         CFG.headerBold := newHeaderBold
         CFG.linesBelow := newLinesBelow
+        CFG.beep := newBeep
 
         ; Layout (single vs. stacked buttons) depends on CFG.showSummarize, so
         ; the window is always rebuilt from scratch rather than reused/shown.
@@ -1253,6 +1388,13 @@ Main() {
             Hotkey(CFG.summarizeHotkey, RunSummarize)
         catch
             MsgBox("The hotkey '" CFG.summarizeHotkey "' in settings.ini is not valid. Fix it and reload from the tray menu.",
+                "PDF Header Tool", "Icon!")
+    }
+    if (CFG.queueHotkey != "") {
+        try
+            Hotkey(CFG.queueHotkey, RunQueue)
+        catch
+            MsgBox("The hotkey '" CFG.queueHotkey "' in settings.ini is not valid. Fix it and reload from the tray menu.",
                 "PDF Header Tool", "Icon!")
     }
     if CFG.showButton

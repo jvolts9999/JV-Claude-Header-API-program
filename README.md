@@ -21,10 +21,21 @@ A third button, **Queue Summary**, sits above Summarize text (shown together,
 hidden together). Click it to queue the current PDF page - the label updates
 to show the count, e.g. `Queue Summary (3)`. With pages queued, clicking
 **Summarize text** summarizes all of them together as one combined entry
-(a multi-page note), ignoring any text selection. The queue holds up to 20
-pages and clears automatically after a successful summary; a failed attempt
-keeps the queue so you can retry. Right-click the Queue button to clear it
-manually. The queue is session-only (not saved between runs).
+(a multi-page note), ignoring any text selection. With pages queued, pressing
+**Insert header** instead reads the FIRST queued page and inserts its header
+- the page stays in the queue (it's still needed for the summary run). The
+queue holds up to 20 pages and clears automatically after a successful
+summary; a failed attempt keeps the queue so you can retry. Right-click the
+Queue button to clear it manually. The queue is session-only (not saved
+between runs).
+
+A short beep plays when a header or summary insert finishes - a higher tone
+on success, a lower one on failure - so you get feedback without having to
+look at the screen. Turn it off in Settings (**Completion beep**). The tray
+icon's tooltip tracks calls made and an estimated cost for the session, e.g.
+"PDF Header Tool - 12 calls, ~8.4 cents this session" (the cost is a rough
+estimate from Anthropic's published per-token pricing, not a billing figure,
+and is omitted for custom/unrecognized model strings).
 
 ## Run
 
@@ -38,11 +49,12 @@ does the same thing: a toast points you at Settings, which opens for you.
 Open the Settings window from the tray icon (**Settings**, the first item) or
 by right-clicking the floating button (right-clicking the Queue Summary
 button itself clears the queue instead). Settings covers the hotkey (or
-turning it off), a second optional hotkey for Summarize text, the model, the
-header font and size, the summary font and size, whether the header uses
-Heading 1 style and bold, how many blank lines follow it, and showing or
-hiding the floating button and the Summarize/Queue buttons. The two hotkeys
-can't both be set to the same key. The API key is set via Settings ->
+turning it off), a second optional hotkey for Summarize text, a third
+optional hotkey for Queue Summary, the model, the header font and size, the
+summary font and size, whether the header uses Heading 1 style and bold, how
+many blank lines follow it, showing or hiding the floating button and the
+Summarize/Queue buttons, and the completion beep. No two of the three
+hotkeys can be set to the same key. The API key is set via Settings ->
 **API key...**, which
 opens its own small dialog (with a Show/Hide toggle to check it). Save
 applies changes right away - no Reload needed.
@@ -53,6 +65,7 @@ hand-editable if you prefer:
 - `ApiKey` - your Claude API key (never stored in this repo)
 - `Hotkey` - default `F8`; blank disables the hotkey
 - `SummarizeHotkey` - default blank (no hotkey); triggers Summarize text (including the queue, if pages are queued)
+- `QueueHotkey` - default blank (no hotkey); triggers Queue Summary (queues the current page)
 - `Model` - default `claude-opus-5`; cheaper alternatives: `claude-sonnet-5` (about 1 cent/press) or `claude-haiku-4-5` (about half a cent/press). Change the line, then Reload from the tray menu.
 - `HeaderFont` - default `Times New Roman`
 - `HeaderSize` - default `20`
@@ -63,6 +76,7 @@ hand-editable if you prefer:
 - `SummarySize` - default `12`; size used for inserted summaries
 - `ShowButton` - `1` shows the floating button, `0` hides it
 - `ShowSummarize` - `1` shows the Summarize text and Queue Summary buttons above it, `0` hides both
+- `Beep` - `1` plays a completion beep (success/failure tone) after each header or summary insert, `0` disables it
 - `ButtonX`/`ButtonY` - remembered button position (set automatically)
 
 ## Tests
