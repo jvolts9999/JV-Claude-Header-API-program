@@ -647,21 +647,40 @@ HDR_SchemeFiles(scheme) {
     }
 }
 
+; Compares two dotted-numeric version strings ("1.6.606" vs "1.6.9", no
+; "app-" prefix) part-by-part, NUMERICALLY - not lexically: a plain string
+; compare would rank "1.6.9" above "1.6.606" ('9' > '6' as characters), which
+; is wrong. A version with fewer dotted parts (or a non-numeric part) treats
+; the missing/invalid part as 0. Returns -1/0/1 for a<b / a=b / a>b. Pure,
+; unit-testable.
+HDR_VersionCompare(a, b) {
+    partsA := StrSplit(a, ".")
+    partsB := StrSplit(b, ".")
+    n := Max(partsA.Length, partsB.Length)
+    loop n {
+        pa := (A_Index <= partsA.Length && IsInteger(partsA[A_Index])) ? Integer(partsA[A_Index]) : 0
+        pb := (A_Index <= partsB.Length && IsInteger(partsB[A_Index])) ? Integer(partsB[A_Index]) : 0
+        if (pa != pb)
+            return (pa > pb) ? 1 : -1
+    }
+    return 0
+}
+
 ; Wispr Flow installs its sounds under a per-version folder; scans
-; %LOCALAPPDATA%\WisprFlow\app-* and returns the LEXICALLY LAST match's
-; resources\assets\sounds path (every version Wispr has shipped so far is the
-; same digit width, so lexical order matches release order) - "" if WisprFlow
-; isn't installed or has no app-* folder at all.
+; %LOCALAPPDATA%\WisprFlow\app-* and returns the NUMERICALLY newest match's
+; resources\assets\sounds path (via HDR_VersionCompare on the part after
+; "app-" - NOT a lexical/string compare, which would wrongly rank e.g.
+; "app-1.6.9" above "app-1.6.606") - "" if WisprFlow isn't installed or has
+; no app-* folder at all.
 HDR_WisprSoundsDir() {
     base := EnvGet("LOCALAPPDATA") "\WisprFlow"
-    best := ""
+    best := "", bestVer := ""
     loop files, base "\app-*", "D" {
-        ; StrCompare, not the > operator: app-N.N.NNN folder names aren't
-        ; numeric, and AHK v2's relational operators require numeric operands
-        ; (throwing TypeError otherwise) - only StrCompare does an actual
-        ; lexical/ordinal string comparison.
-        if (StrCompare(A_LoopFileName, best) > 0)
+        ver := SubStr(A_LoopFileName, 5)  ; strip the literal 4-char "app-" prefix
+        if (best = "" || HDR_VersionCompare(ver, bestVer) > 0) {
             best := A_LoopFileName
+            bestVer := ver
+        }
     }
     return (best = "") ? "" : base "\" best "\resources\assets\sounds"
 }
@@ -674,14 +693,33 @@ HDR_WisprSoundsDir() {
 ; (beep scheme, Wispr not installed, source file missing, copy failed) -
 ; callers treat an empty/missing-key Map as "fall back to the two-tone beep,"
 ; never as an error.
+;
+; Cache-first (review fix): every needed local file is checked BEFORE
+; HDR_WisprSoundsDir() is ever called. If they're all already cached, that
+; cached Map is returned immediately - Wispr's install dir is never resolved,
+; so an intact cache still works even after Wispr is uninstalled or mid-
+; update (the whole point of caching), and a warm chime never pays for the
+; dir-scan at all. HDR_WisprSoundsDir() is only resolved, and only the
+; actually-missing files copied, when something isn't cached yet.
 HDR_EnsureSounds(scheme) {
     files := HDR_SchemeFiles(scheme)
     if (files.Count = 0)
         return Map()
+    cacheDir := A_AppData "\PDFHeaderTool\sounds"
+    cached := Map()
+    allCached := true
+    for kind, relPath in files {
+        localPath := cacheDir "\" scheme "-" kind ".wav"
+        if FileExist(localPath)
+            cached[kind] := localPath
+        else
+            allCached := false
+    }
+    if allCached
+        return cached
     wisprDir := HDR_WisprSoundsDir()
     if (wisprDir = "")
         return Map()
-    cacheDir := A_AppData "\PDFHeaderTool\sounds"
     try
         DirCreate(cacheDir)
     catch

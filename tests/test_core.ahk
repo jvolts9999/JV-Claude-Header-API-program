@@ -514,5 +514,11 @@ cfg24b := LoadSettings(sPath24b)
 AssertEq(cfg24b.settingsHotkey, "F6", "settings hotkey override read")
 FileDelete(sPath24b)
 
+; ---- Review fix: HDR_VersionCompare (numeric, not lexical, version compare) ----
+AssertTrue(HDR_VersionCompare("1.6.606", "1.6.9") > 0, "versioncompare 606 beats 9 numerically")
+AssertTrue(HDR_VersionCompare("1.6.9", "1.6.606") < 0, "versioncompare 9 loses to 606 numerically")
+AssertTrue(HDR_VersionCompare("1.7.0", "1.6.999") > 0, "versioncompare higher minor beats lower-minor larger patch")
+AssertEq(HDR_VersionCompare("1.6.606", "1.6.606"), 0, "versioncompare equal versions")
+
 FileAppend((TestFails ? "FAILED " TestFails "/" TestCount : "PASSED " TestCount) " tests`n", "*")
 ExitApp(TestFails)
