@@ -1337,3 +1337,37 @@ GREEN = `PASSED 95 tests` (86 + 9 new, 1 updated in place), exit 0.
 **Checkpoint 5b (John):** strip appears under the button, connected, button-width; imaging
 page → two-part header with no provider and no PROVIDER placeholder; clinic note → unchanged
 three-part header. Then shortcut + final review.
+
+### Task 13 (John revision 2026-08-22): blank missing fields, no highlights
+
+John's ruling: no yellow highlighting, ever. Missing provider / note type → the segment AND
+its separator are omitted entirely. Missing/unparseable date → plain `MM/DD/YYYY` text with
+NO highlight (kept so ChronologySuite's date-first sorter still recognizes the entry — John
+chose this explicitly). Applies to both three-part and imaging two-part headers.
+
+**Files:**
+- Modify: `PDFHeaderTool.ahk` (BuildHeader only — InsertHeader keeps its marks loop and
+  simply receives an empty array; no other function changes)
+- Modify: `tests\test_core.ahk` (update placeholder-era assertions; add omission cases)
+- Modify: `README.md` (the "yellow-highlighted placeholders" sentence: now "a missing date
+  is inserted as plain MM/DD/YYYY; other missing fields are simply omitted")
+
+**BuildHeader replacement (behavior):** signature unchanged
+`BuildHeader(dateRaw, provider, noteType, includeProvider := true)`; returns `{text, marks}`
+with `marks` ALWAYS `[]`. Build a parts list: date first (normalized, else literal
+`MM/DD/YYYY`); provider only when `includeProvider` and non-blank after Trim; noteType only
+when non-blank after Trim; join with `" " Chr(0x2014) " "`. No leading/trailing/doubled
+separators possible by construction.
+
+**Test updates (spec-driven, sanctioned):** rewrite the existing placeholder/mark
+assertions in the Task-2 block and Task-12 block to the new expectations, e.g.:
+- `BuildHeader("", "John Smith, MD", "")` → text `"MM/DD/YYYY" sep "John Smith, MD"`, marks.Length 0
+- `BuildHeader("bad date", "", "MRI")` → `"MM/DD/YYYY" sep "MRI"`, marks.Length 0
+- `BuildHeader("2023-03-14", "", "")` → `"03/14/2023"`
+- `BuildHeader("2023-03-14", "John Smith, MD", "Office Visit")` → unchanged three-part, marks.Length 0
+- imaging: `BuildHeader("", "", "", false)` → `"MM/DD/YYYY"`, marks.Length 0; full imaging case unchanged
+Every old assertion that asserted highlight marks/offsets is updated or replaced — none
+deleted without a replacement covering the same input shape. Implementer recounts the suite
+total, states it in the report, and GREEN must match that stated count with exit 0.
+
+**Checkpoint:** none needed (pure text logic, fully unit-covered); John sees it in daily use.
