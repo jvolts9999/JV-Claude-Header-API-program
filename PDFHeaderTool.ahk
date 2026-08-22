@@ -241,8 +241,21 @@ BuildRequestBody(b64pdf, model) {
 ; Sentence-count instruction shared by all three summary prompt builders,
 ; keyed by summary detail level (case-insensitive). Anything other than
 ; concise/detailed falls back to standard - same rule LoadSettings applies
-; when it clamps CFG.summaryDetail.
-HDR_DetailClause(level) {
+; when it clamps CFG.summaryDetail. soap:=true swaps in the sectioned-format
+; wording (same sentence budget, "in total across the sections" instead of
+; "of plain prose") used by HDR_FormatClause's soap branch; the default
+; (soap:=false) is byte-identical to the original prose-only clause.
+HDR_DetailClause(level, soap := false) {
+    if soap {
+        switch StrLower(Trim(level)) {
+            case "concise":
+                return "Write 1-2 sentences in total across the sections."
+            case "detailed":
+                return "Write 4-8 sentences in total across the sections."
+            default:
+                return "Write 2-4 sentences in total across the sections."
+        }
+    }
     switch StrLower(Trim(level)) {
         case "concise":
             return "Write 1-2 sentences of plain prose."
@@ -253,20 +266,50 @@ HDR_DetailClause(level) {
     }
 }
 
-BuildSummaryRequestBody(excerpt, model, detail := "standard") {
+; Structural instruction shared by all three summary prompt builders, keyed
+; by summary format (case-insensitive via HDR_ValidFormat - anything other
+; than prose is treated as soap, same rule LoadSettings applies when it
+; clamps CFG.summaryFormat). prose reproduces today's plain-prose clause
+; byte-for-byte; soap asks for labeled Subjective/Physical Exam/Assessment &
+; Plan lines (omitting empty sections) and folds in med-legal prioritization
+; directly, since John ruled out a separate flags line or toggle.
+HDR_FormatClause(format, detail) {
+    if (HDR_ValidFormat(format) = "prose")
+        return HDR_DetailClause(detail)
+    return "Structure the summary as labeled lines, including a section ONLY when the source documents it (omit empty sections): 'Subjective:' - history and complaints; 'Physical Exam:' - objective findings; 'Assessment & Plan:' - impressions, decisions, and treatment. "
+        . "Prioritize findings of potential medical-legal significance: sentinel events, complications, new or missed findings, deviations from expected care, and turning points in the clinical course. "
+        . HDR_DetailClause(detail, true)
+}
+
+; The "no preamble" instruction's wording depends on format: prose still
+; forbids headings outright (unchanged from before this task); soap's
+; labeled section lines ARE headings, so that blanket ban would contradict
+; the format clause above it - soap keeps the no-preamble/no-bullets part
+; only.
+HDR_PreambleClause(format) {
+    return (HDR_ValidFormat(format) = "prose")
+        ? "No preamble, no headings, no bullet points - just the sentences."
+        : "No preamble and no bullet points."
+}
+
+BuildSummaryRequestBody(excerpt, model, detail := "standard", format := "soap", custom := "") {
     prompt := "Summarize the following excerpt from a medical record for a medical-legal chronology. "
-        . HDR_DetailClause(detail) " "
-        . "No preamble, no headings, no bullet points - just the sentences. Excerpt:"
+        . HDR_FormatClause(format, detail) " "
+        . HDR_PreambleClause(format) " Excerpt:"
+    if (Trim(custom) != "")
+        prompt .= " Additional instructions: " Trim(custom)
     fb := ModelWantsFallbacks(model) ? '"fallbacks":"default",' : ""
     return '{"model":"' Json.Escape(model) '","max_tokens":16000,' fb
         . '"messages":[{"role":"user","content":['
         . '{"type":"text","text":"' Json.Escape(prompt) '\n\n' Json.Escape(excerpt) '"}]}]}'
 }
 
-BuildPageSummaryRequestBody(b64pdf, model, detail := "standard") {
+BuildPageSummaryRequestBody(b64pdf, model, detail := "standard", format := "soap", custom := "") {
     prompt := "Summarize this page of a medical record for a medical-legal chronology. "
-        . HDR_DetailClause(detail) " "
-        . "No preamble, no headings, no bullet points - just the sentences."
+        . HDR_FormatClause(format, detail) " "
+        . HDR_PreambleClause(format)
+    if (Trim(custom) != "")
+        prompt .= " Additional instructions: " Trim(custom)
     fb := ModelWantsFallbacks(model) ? '"fallbacks":"default",' : ""
     return '{"model":"' Json.Escape(model) '","max_tokens":16000,' fb
         . '"messages":[{"role":"user","content":['
@@ -274,11 +317,13 @@ BuildPageSummaryRequestBody(b64pdf, model, detail := "standard") {
         . '{"type":"text","text":"' Json.Escape(prompt) '"}]}]}'
 }
 
-BuildQueueSummaryRequestBody(b64List, model, detail := "standard") {
+BuildQueueSummaryRequestBody(b64List, model, detail := "standard", format := "soap", custom := "") {
     prompt := "These pages are one multi-page note from a medical record, in order. "
         . "Summarize the note for a medical-legal chronology. "
-        . HDR_DetailClause(detail) " "
-        . "No preamble, no headings, no bullet points - just the sentences."
+        . HDR_FormatClause(format, detail) " "
+        . HDR_PreambleClause(format)
+    if (Trim(custom) != "")
+        prompt .= " Additional instructions: " Trim(custom)
     fb := ModelWantsFallbacks(model) ? '"fallbacks":"default",' : ""
     blocks := ""
     for b64 in b64List
@@ -469,6 +514,8 @@ LoadSettings(p := "") {
             . "SummaryFont=Times New Roman`n"
             . "SummarySize=12`n"
             . "SummaryDetail=standard`n"
+            . "SummaryFormat=soap`n"
+            . "CustomInstructions=`n"
             . "Beep=1`n"
             . "ComboInsert=1`n", p, "UTF-16")
     }
@@ -490,6 +537,8 @@ LoadSettings(p := "") {
         summaryFont: Trim(IniRead(p, "Settings", "SummaryFont", "Times New Roman")),
         summarySize: HDR_ValidSize(Trim(IniRead(p, "Settings", "SummarySize", "12")), 12),
         summaryDetail: HDR_ValidDetail(Trim(IniRead(p, "Settings", "SummaryDetail", "standard"))),
+        summaryFormat: HDR_ValidFormat(Trim(IniRead(p, "Settings", "SummaryFormat", "soap"))),
+        customInstructions: Trim(IniRead(p, "Settings", "CustomInstructions", "")),
         beep: Trim(IniRead(p, "Settings", "Beep", "1")) = "1",
         comboInsert: Trim(IniRead(p, "Settings", "ComboInsert", "1")) = "1"}
 }
@@ -499,6 +548,13 @@ LoadSettings(p := "") {
 HDR_ValidDetail(v) {
     lv := StrLower(Trim(v))
     return (lv = "concise" || lv = "detailed") ? lv : "standard"
+}
+
+; Canonicalizes a SummaryFormat ini value to lowercase soap/prose; anything
+; else (garbage, blank, wrong case) falls back to soap.
+HDR_ValidFormat(v) {
+    lv := StrLower(Trim(v))
+    return (lv = "prose") ? "prose" : "soap"
 }
 
 HDR_ValidSize(v, fallback := 20) {
@@ -933,7 +989,7 @@ RunSummarizeCore(&savedClip, summaryAt := -1) {
         b64List := []
         for item in SUMQUEUE
             b64List.Push(FileToBase64(item.pdfPath))
-        ok := SummarizeAndInsert(BuildQueueSummaryRequestBody(b64List, CFG.model, CFG.summaryDetail), "Summarizing " n " queued pages...")
+        ok := SummarizeAndInsert(BuildQueueSummaryRequestBody(b64List, CFG.model, CFG.summaryDetail, CFG.summaryFormat, CFG.customInstructions), "Summarizing " n " queued pages...")
         if ok {
             for item in SUMQUEUE
                 try FileDelete(item.pdfPath)
@@ -963,14 +1019,14 @@ RunSummarizeCore(&savedClip, summaryAt := -1) {
         }
         b64 := FileToBase64(g.pdfPath)
         try FileDelete(g.pdfPath)
-        SummarizeAndInsert(BuildPageSummaryRequestBody(b64, CFG.model, CFG.summaryDetail), "Summarizing page " g.pageNum "...")
+        SummarizeAndInsert(BuildPageSummaryRequestBody(b64, CFG.model, CFG.summaryDetail, CFG.summaryFormat, CFG.customInstructions), "Summarizing page " g.pageNum "...")
         return
     }
     if (StrLen(excerpt) > 200000) {
         Toast("Selection is too large.")
         return
     }
-    SummarizeAndInsert(BuildSummaryRequestBody(excerpt, CFG.model, CFG.summaryDetail), "Summarizing...")
+    SummarizeAndInsert(BuildSummaryRequestBody(excerpt, CFG.model, CFG.summaryDetail, CFG.summaryFormat, CFG.customInstructions), "Summarizing...")
 }
 
 ; SUMQUEUE label text lives on the Queue button itself; this is the one place
@@ -1225,6 +1281,21 @@ ShowSettingsGui() {
     }
     detailDDL := SETGUI.AddDropDownList("w120 x+10 yp-2 Choose" detailIdx, detailItems)
 
+    SETGUI.AddText("xm y+12", "Summary format:").SetFont("cWhite")
+    formatItems := ["Sectioned (SOAP)", "Prose"]
+    formatLevels := ["soap", "prose"]
+    formatIdx := 1
+    for i, fmt in formatLevels {
+        if (fmt = CFG.summaryFormat) {
+            formatIdx := i
+            break
+        }
+    }
+    formatDDL := SETGUI.AddDropDownList("w160 x+10 yp-2 Choose" formatIdx, formatItems)
+
+    SETGUI.AddText("xm y+12", "Custom summary instructions:").SetFont("cWhite")
+    customEdit := SETGUI.AddEdit("w300 x+10 yp-2", CFG.customInstructions)
+
     applyStyleChk := SETGUI.AddCheckbox("xm y+14" (CFG.applyStyle ? " Checked" : ""))
     SETGUI.AddText("x+4 yp", "Apply Heading 1 style").SetFont("cWhite")
     boldChk := SETGUI.AddCheckbox("x+20 yp" (CFG.headerBold ? " Checked" : ""))
@@ -1327,6 +1398,8 @@ ShowSettingsGui() {
         newSummaryFont := sFontCombo.Text
         newSummarySize := HDR_ValidSize(sSizeEdit.Text, 12)
         newSummaryDetail := detailLevels[detailDDL.Value]
+        newSummaryFormat := formatLevels[formatDDL.Value]
+        newCustomInstructions := Trim(customEdit.Text)
         newApiKey := Trim(pendingApiKey)
         newShowButton := showBtnChk.Value ? true : false
         newShowSummarize := showSummarizeChk.Value ? true : false
@@ -1345,6 +1418,8 @@ ShowSettingsGui() {
         IniWrite(newSummaryFont, CFG.path, "Settings", "SummaryFont")
         IniWrite(newSummarySize, CFG.path, "Settings", "SummarySize")
         IniWrite(newSummaryDetail, CFG.path, "Settings", "SummaryDetail")
+        IniWrite(newSummaryFormat, CFG.path, "Settings", "SummaryFormat")
+        IniWrite(newCustomInstructions, CFG.path, "Settings", "CustomInstructions")
         IniWrite(newShowButton ? "1" : "0", CFG.path, "Settings", "ShowButton")
         IniWrite(newShowSummarize ? "1" : "0", CFG.path, "Settings", "ShowSummarize")
         IniWrite(newApiKey, CFG.path, "Settings", "ApiKey")
@@ -1363,6 +1438,8 @@ ShowSettingsGui() {
         CFG.summaryFont := newSummaryFont
         CFG.summarySize := newSummarySize
         CFG.summaryDetail := newSummaryDetail
+        CFG.summaryFormat := newSummaryFormat
+        CFG.customInstructions := newCustomInstructions
         CFG.showButton := newShowButton
         CFG.showSummarize := newShowSummarize
         CFG.apiKey := newApiKey

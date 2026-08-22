@@ -382,5 +382,56 @@ cfg20 := LoadSettings(sPath20)
 AssertEq(cfg20.comboInsert ? 1 : 0, 0, "combo insert override off")
 FileDelete(sPath20)
 
+; ---- Task 22: SOAP summary format, med-legal orientation, custom instructions ----
+
+; HDR_ValidFormat
+AssertEq(HDR_ValidFormat("soap"), "soap", "validformat soap passthrough")
+AssertEq(HDR_ValidFormat("prose"), "prose", "validformat prose")
+AssertEq(HDR_ValidFormat("garbage"), "soap", "validformat garbage falls back to soap")
+
+; LoadSettings: summaryFormat / customInstructions
+sPath22 := A_Temp "\pdfheadertool_settings_t22.ini"
+try FileDelete(sPath22)
+cfg22 := LoadSettings(sPath22)
+AssertEq(cfg22.summaryFormat, "soap", "summary format default soap")
+AssertEq(cfg22.customInstructions, "", "custom instructions default empty")
+IniWrite("Prose", sPath22, "Settings", "SummaryFormat")
+IniWrite("note all med changes", sPath22, "Settings", "CustomInstructions")
+cfg22 := LoadSettings(sPath22)
+AssertEq(cfg22.summaryFormat, "prose", "summary format override read, case-insensitive")
+AssertEq(cfg22.customInstructions, "note all med changes", "custom instructions override roundtrip")
+FileDelete(sPath22)
+
+; HDR_FormatClause: prose mode is byte-identical to HDR_DetailClause
+AssertEq(HDR_FormatClause("prose", "standard"), HDR_DetailClause("standard"),
+    "format clause prose mode matches detail clause exactly")
+
+; Builders: default format is soap - labeled lines plus med-legal framing,
+; same sentence budget as before
+sReq22 := Json.Parse(BuildSummaryRequestBody(excerpt16, "claude-opus-5"))
+defaultTxt22 := sReq22["messages"][1]["content"][1]["text"]
+AssertTrue(InStr(defaultTxt22, "Subjective:") > 0, "default summary format is soap - has Subjective label")
+AssertTrue(InStr(defaultTxt22, "2-4 sentences") > 0, "default summary detail still standard - 2-4 sentences")
+
+; format:="prose" restores the old shape exactly (no section labels, same
+; sentence budget, same no-headings phrase)
+sReqProse22 := Json.Parse(BuildSummaryRequestBody(excerpt16, "claude-opus-5", "standard", "prose"))
+proseTxt22 := sReqProse22["messages"][1]["content"][1]["text"]
+AssertTrue(InStr(proseTxt22, "Subjective:") = 0 && InStr(proseTxt22, "2-4 sentences") > 0
+    && InStr(proseTxt22, "No preamble, no headings, no bullet points") > 0,
+    "format=prose lacks Subjective label and matches old prose shape")
+
+; Custom summary instructions: appended when present, absent when empty
+sReqCustom22 := Json.Parse(BuildSummaryRequestBody(excerpt16, "claude-opus-5", "standard", "soap", "note all med changes"))
+customTxt22 := sReqCustom22["messages"][1]["content"][1]["text"]
+AssertTrue(InStr(customTxt22, "Additional instructions: note all med changes") > 0,
+    "custom instructions appear in summary prompt when present")
+AssertEq(InStr(defaultTxt22, "Additional instructions:"), 0, "custom instructions absent when empty")
+
+qReqCustom22 := Json.Parse(BuildQueueSummaryRequestBody(qList, "claude-opus-5", "standard", "soap", "note all med changes"))
+qCustomTxt22 := qReqCustom22["messages"][1]["content"][4]["text"]
+AssertTrue(InStr(qCustomTxt22, "Additional instructions: note all med changes") > 0,
+    "custom instructions appear in queue summary prompt when present")
+
 FileAppend((TestFails ? "FAILED " TestFails "/" TestCount : "PASSED " TestCount) " tests`n", "*")
 ExitApp(TestFails)

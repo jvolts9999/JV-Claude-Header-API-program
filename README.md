@@ -9,15 +9,24 @@ and study type, no provider.
 
 A second floating button, **Summarize text**, sits directly above the header
 button. Select text in the PDF in Acrobat and click it (it auto-copies the
-selection - no need to press Ctrl+C yourself) to get a plain-prose summary -
-what happened, key findings, plan - typed into Word at the cursor; with no
-selection, it summarizes the current PDF page instead. Uses the same Claude
-model as the header button. Summary length is set in Settings (**Summary
-detail**: Concise = 1-2 sentences, Standard = 2-4 sentences (default),
-Detailed = 4-8 sentences covering relevant history too). The summary is typed
+selection - no need to press Ctrl+C yourself) to get a summary typed into
+Word at the cursor; with no selection, it summarizes the current PDF page
+instead. By default the summary is sectioned: labeled `Subjective:`,
+`Physical Exam:`, and `Assessment & Plan:` lines, each included only when the
+source actually documents it, and written to prioritize findings of
+potential medical-legal significance (sentinel events, complications, new or
+missed findings, deviations from expected care, turning points in the care).
+Switch to plain prose instead in Settings (**Summary format**). Uses the
+same Claude model as the header button. Summary length is set in Settings
+(**Summary detail**: Concise = 1-2 sentences, Standard = 2-4 sentences
+(default), Detailed = 4-8 sentences covering relevant history too - counted
+across all sections in the default sectioned format). The summary is typed
 in its own font and size (separate from the header font), configurable in
-Settings. Toggle the Summarize button off in Settings (**Show Summarize
-button**) if you only want the single header button.
+Settings. A free-text **Custom summary instructions** field in Settings is
+appended to every summary prompt whenever it's non-empty - a standing tuning
+knob, e.g. "always flag medication changes." Toggle the Summarize button off
+in Settings (**Show Summarize button**) if you only want the single header
+button.
 
 By default, clicking **Summarize text** (or its hotkey) first inserts the
 header, then the summary below it - one press for the whole entry. Turn this
@@ -62,7 +71,9 @@ button itself clears the queue instead). Settings covers the hotkey (or
 turning it off), a second optional hotkey for Summarize text, a third
 optional hotkey for Queue Summary, the model, the header font and size, the
 summary font and size, the summary detail level (Concise/Standard/Detailed),
-whether the header uses Heading 1 style and bold, how many blank lines follow
+the summary format (Sectioned (SOAP), the default, or Prose) and custom
+summary instructions, whether the header uses Heading 1 style and bold, how
+many blank lines follow
 it, showing or hiding the floating button and the Summarize/Queue buttons, the
 one-press header+summary combo, and the completion beep. No two of the three
 hotkeys can be set to the same key. The API key is set via Settings ->
@@ -86,6 +97,8 @@ hand-editable if you prefer:
 - `SummaryFont` - default `Times New Roman`; font used for inserted summaries
 - `SummarySize` - default `12`; size used for inserted summaries
 - `SummaryDetail` - `concise`, `standard` (default), or `detailed` - how many sentences the three summary prompts ask for; anything else falls back to `standard`
+- `SummaryFormat` - `soap` (default) or `prose` - sectioned `Subjective:`/`Physical Exam:`/`Assessment & Plan:` lines (empty sections omitted, medical-legal findings prioritized) vs. the old plain-prose shape; anything else falls back to `soap`
+- `CustomInstructions` - free-text instructions appended to every summary prompt when non-empty; default blank
 - `ShowButton` - `1` shows the floating button, `0` hides it
 - `ShowSummarize` - `1` shows the Summarize text and Queue Summary buttons above it, `0` hides both
 - `ComboInsert` - `1` (default) makes Summarize text insert the header first, then the summary below it; `0` runs the two independently
