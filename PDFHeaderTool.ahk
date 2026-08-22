@@ -853,7 +853,11 @@ RunQueueCore() {
 }
 
 RunQueueClear() {
-    global SUMQUEUE
+    global BUSY, SUMQUEUE
+    if BUSY {
+        Toast("Busy - try again in a moment.")
+        return
+    }
     for item in SUMQUEUE
         try FileDelete(item.pdfPath)
     SUMQUEUE := []
