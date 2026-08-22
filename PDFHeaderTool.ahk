@@ -629,24 +629,29 @@ ShowSettingsGui() {
     SETGUI.BackColor := "0x2B2B2B"
     SETGUI.MarginX := 12
     SETGUI.MarginY := 10
-    SETGUI.SetFont("s9 cWhite")
+    SETGUI.SetFont("s9")
     try
         DllCall("dwmapi\DwmSetWindowAttribute", "ptr", SETGUI.Hwnd, "uint", 20, "int*", 1, "uint", 4)
 
-    SETGUI.AddText("", "Hotkey:")
+    ; Labels get explicit light text per-control (SetFont("cWhite") on the
+    ; returned control) rather than as the ambient default, so input controls
+    ; added afterward (Edit/ComboBox/DropDownList/Hotkey) keep default/dark
+    ; text on their own light system backgrounds - a blanket ambient cWhite
+    ; would otherwise make those controls' text white-on-white and unreadable.
+    SETGUI.AddText("", "Hotkey:").SetFont("cWhite")
     try
         hkCtl := SETGUI.AddHotkey("w150 x+10 yp-2", CFG.hotkey)
     catch
         hkCtl := SETGUI.AddHotkey("w150 x+10 yp-2")
     noHotkeyChk := SETGUI.AddCheckbox("x+10 yp+2" (CFG.hotkey = "" ? " Checked" : ""))
-    SETGUI.AddText("x+4 yp", "No hotkey")
+    SETGUI.AddText("x+4 yp", "No hotkey").SetFont("cWhite")
     hkCtl.Enabled := (CFG.hotkey != "")
     noHotkeyChk.OnEvent("Click", SETGUI_ToggleHotkey)
     SETGUI_ToggleHotkey(*) {
         hkCtl.Enabled := !noHotkeyChk.Value
     }
 
-    SETGUI.AddText("xm y+12", "Model:")
+    SETGUI.AddText("xm y+12", "Model:").SetFont("cWhite")
     labels := []
     for m in mo
         labels.Push(m.label)
@@ -664,6 +669,7 @@ ShowSettingsGui() {
     modelDDL := SETGUI.AddDropDownList("w300 x+10 yp-2 Choose" modelIdx, labels)
     modelNoteTxt := SETGUI.AddText("xm y+6 w300 r3",
         (modelIdx <= mo.Length) ? ModelNoteFor(mo[modelIdx].id) : "Custom model string from settings file.")
+    modelNoteTxt.SetFont("cWhite")
     modelDDL.OnEvent("Change", SETGUI_ModelChanged)
     SETGUI_ModelChanged(*) {
         idx := modelDDL.Value
@@ -671,7 +677,7 @@ ShowSettingsGui() {
             ? ModelNoteFor(mo[idx].id) : "Custom model string from settings file."
     }
 
-    SETGUI.AddText("xm y+12", "Font:")
+    SETGUI.AddText("xm y+12", "Font:").SetFont("cWhite")
     fonts := ["Times New Roman", "Calibri", "Cambria", "Georgia", "Arial", "Book Antiqua"]
     fontIdx := 0
     for i, f in fonts {
@@ -685,20 +691,20 @@ ShowSettingsGui() {
         fontIdx := fonts.Length
     }
     fontCombo := SETGUI.AddComboBox("w200 x+10 yp-2 Choose" fontIdx, fonts)
-    SETGUI.AddText("x+10 yp+4", "Size:")
+    SETGUI.AddText("x+10 yp+4", "Size:").SetFont("cWhite")
     sizeEdit := SETGUI.AddEdit("w60 x+6 yp-4 Number", CFG.headerSize)
     SETGUI.AddUpDown("Range6-72", CFG.headerSize)
 
     applyStyleChk := SETGUI.AddCheckbox("xm y+14" (CFG.applyStyle ? " Checked" : ""))
-    SETGUI.AddText("x+4 yp", "Apply Heading 1 style")
+    SETGUI.AddText("x+4 yp", "Apply Heading 1 style").SetFont("cWhite")
     boldChk := SETGUI.AddCheckbox("x+20 yp" (CFG.headerBold ? " Checked" : ""))
-    SETGUI.AddText("x+4 yp", "Bold")
+    SETGUI.AddText("x+4 yp", "Bold").SetFont("cWhite")
 
-    SETGUI.AddText("xm y+12", "Blank lines below:")
+    SETGUI.AddText("xm y+12", "Blank lines below:").SetFont("cWhite")
     linesDDL := SETGUI.AddDropDownList("w60 x+10 yp-2 Choose" (CFG.linesBelow + 1), ["0", "1", "2", "3"])
 
     showBtnChk := SETGUI.AddCheckbox("xm y+14" (CFG.showButton ? " Checked" : ""))
-    SETGUI.AddText("x+4 yp", "Show floating button")
+    SETGUI.AddText("x+4 yp", "Show floating button").SetFont("cWhite")
 
     pendingApiKey := CFG.apiKey
     apiKeyBtn := SETGUI.AddButton("xm y+16 w120", "API key...")
@@ -809,11 +815,11 @@ ShowApiKeyDialog(owner, currentKey) {
     kg.BackColor := "0x2B2B2B"
     kg.MarginX := 12
     kg.MarginY := 10
-    kg.SetFont("s9 cWhite")
+    kg.SetFont("s9")
     try
         DllCall("dwmapi\DwmSetWindowAttribute", "ptr", kg.Hwnd, "uint", 20, "int*", 1, "uint", 4)
 
-    kg.AddText("", "Claude API key:")
+    kg.AddText("", "Claude API key:").SetFont("cWhite")
     keyEdit := kg.AddEdit("w320 r1 x+10 yp-2 Password", currentKey)
     showBtn := kg.AddButton("w50 x+6 yp-2", "Show")
     showBtn.OnEvent("Click", KEY_ToggleShow)
