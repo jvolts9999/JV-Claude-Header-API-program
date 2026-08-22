@@ -1754,3 +1754,47 @@ unmodified; implementer recounts (163 + 2 = 165 expected), GREEN must match, exi
 **Checkpoint 8c (John, cumulative with 8b):** with combo ON: one press on a queued
 multi-page note -> header + blanks + summary; header-phase failure stops the combo; with
 combo OFF: buttons behave separately as before. Then merge + push.
+
+### Task 21 (checkpoint bug, John 2026-08-22): combo summary placement
+
+Bug: in combo mode the summary lands ABOVE the header. Root cause: `InsertSummary` anchors
+on `word.Selection.Range.Start`; a cursor collapsed at the START of its paragraph does not
+advance when the header phase inserts at that same offset, so the stale position points at
+the head of the just-inserted header. John's spec: summary goes BELOW the header with
+exactly ONE blank line separating them; blanks/summary render at the Summary font/size
+setting.
+
+**Files:** `PDFHeaderTool.ahk` only (all COM — no new unit tests; suite stays 165).
+
+**Changes:**
+
+1. `InsertHeader` success return becomes `{ok: true, insertAt: insertAt, len: StrLen(hdr.text)}`
+   (extra fields; existing callers that only read `.ok`/`.err` unaffected).
+2. `RunInsertCore(combo := false)`: when `combo` is true, use
+   `linesEff := Max(CFG.linesBelow, 1)` in place of `CFG.linesBelow` (guarantees the one
+   separating blank), and on success return the InsertHeader result OBJECT (truthy);
+   all failure paths still return `false`; non-combo behavior byte-identical
+   (`RunInsert` wrapper unchanged, still discards).
+3. `InsertSummary(text, fontName := "", fontSize := 0, atPos := -1)`: when `atPos >= 0`,
+   positioned mode — insert `text "`r"` at `doc.Range(atPos, atPos)` (NOT at Selection),
+   then `rng := doc.Range(atPos, atPos + StrLen(text) + 1)` (includes the new paragraph
+   mark), `rng.Style := -1` (Normal), then the existing font block on `rng`. Selection
+   mode (`atPos = -1`) unchanged.
+4. Combo orchestration in `RunSummarize`: `hdrRes := CFG.comboInsert ? RunInsertCore(true) : ""`;
+   stop when combo and `!hdrRes`. Compute `summaryAt := hdrRes.insertAt + hdrRes.len + 2`
+   (start of the position right after the header's paragraph mark plus the first blank's
+   mark — i.e., the summary paragraph splits off there, leaving exactly one blank between
+   header and summary; any additional configured blanks remain below the summary).
+   Thread it: `RunSummarizeCore(&savedClip, summaryAt)` (new param default -1) ->
+   `SummarizeAndInsert` passes it to `InsertSummary(..., atPos)`. Non-combo calls keep
+   `-1` everywhere (Selection mode).
+5. Geometry re-derivation the implementer must confirm by reading InsertHeader: after the
+   header phase the document reads `[header text][PILCROW][blank1 PILCROW][blank2 PILCROW]...[original]`
+   with `insertAt` at the header text start; `insertAt + len` = the header's own pilcrow;
+   `+1` = start of blank1; `+2` = start of blank2 (or of the original paragraph when
+   linesEff = 1) — inserting `text "`r"` there yields header / one blank / summary
+   paragraph / (remaining blanks) / original, for every linesEff >= 1.
+
+**Checkpoint 8d (John):** combo press on an empty line: header, ONE blank, summary below
+it, all at the configured fonts (header size, summary size); original paragraph untouched
+below; non-combo summarize still inserts at the cursor; header-only button unchanged.
