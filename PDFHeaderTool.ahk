@@ -312,7 +312,9 @@ LoadSettings(p := "") {
             . "Model=claude-opus-5`n"
             . "ShowButton=1`n"
             . "ButtonX=`n"
-            . "ButtonY=`n", p, "UTF-16")
+            . "ButtonY=`n"
+            . "HeaderFont=Times New Roman`n"
+            . "HeaderSize=20`n", p, "UTF-16")
     }
     return {path: p, firstRun: firstRun,
         apiKey: Trim(IniRead(p, "Settings", "ApiKey", "")),
@@ -320,7 +322,16 @@ LoadSettings(p := "") {
         model: Trim(IniRead(p, "Settings", "Model", "claude-opus-5")),
         showButton: Trim(IniRead(p, "Settings", "ShowButton", "1")) = "1",
         btnX: Trim(IniRead(p, "Settings", "ButtonX", "")),
-        btnY: Trim(IniRead(p, "Settings", "ButtonY", ""))}
+        btnY: Trim(IniRead(p, "Settings", "ButtonY", "")),
+        headerFont: Trim(IniRead(p, "Settings", "HeaderFont", "Times New Roman")),
+        headerSize: HDR_ValidSize(Trim(IniRead(p, "Settings", "HeaderSize", "20")))}
+}
+
+HDR_ValidSize(v) {
+    if (v = "" || !IsInteger(v))
+        return 20
+    v := Integer(v)
+    return (v < 6 || v > 72) ? 20 : v
 }
 
 Toast(msg, ms := 2600) {
@@ -358,7 +369,7 @@ GrabCurrentPage() {
 }
 
 ; --- Word --------------------------------------------------------------
-InsertHeader(hdr) {
+InsertHeader(hdr, fontName := "", fontSize := 0) {
     try
         word := ComObjActive("Word.Application")
     catch
@@ -373,6 +384,13 @@ InsertHeader(hdr) {
         newRng.InsertBefore(hdr.text "`r")
         hdrRng := doc.Range(insertAt, insertAt + StrLen(hdr.text))
         hdrRng.Style := -2  ; wdStyleHeading1
+        if (fontName != "" || fontSize > 0) {
+            if (fontName != "")
+                hdrRng.Font.Name := fontName
+            if (fontSize > 0)
+                hdrRng.Font.Size := fontSize
+            hdrRng.Font.Color := 0  ; black - Heading1's theme color would otherwise win
+        }
         for mk in hdr.marks {
             mrng := doc.Range(insertAt + mk.start - 1, insertAt + mk.start - 1 + mk.len)
             mrng.HighlightColorIndex := 7  ; wdYellow
@@ -427,7 +445,7 @@ RunInsertCore() {
         return
     }
     hdr := BuildHeader(f.date, f.provider, f.notetype)
-    w := InsertHeader(hdr)
+    w := InsertHeader(hdr, CFG.headerFont, CFG.headerSize)
     Toast(w.ok ? hdr.text : w.err)
 }
 
