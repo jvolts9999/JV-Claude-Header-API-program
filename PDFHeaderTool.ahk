@@ -626,16 +626,20 @@ ShowSettingsGui() {
     mo := ModelOptions()
 
     SETGUI := Gui("+ToolWindow", "PDF Header Tool - Settings")
+    SETGUI.BackColor := "0x2B2B2B"
     SETGUI.MarginX := 12
     SETGUI.MarginY := 10
-    SETGUI.SetFont("s9")
+    SETGUI.SetFont("s9 cWhite")
+    try
+        DllCall("dwmapi\DwmSetWindowAttribute", "ptr", SETGUI.Hwnd, "uint", 20, "int*", 1, "uint", 4)
 
     SETGUI.AddText("", "Hotkey:")
     try
         hkCtl := SETGUI.AddHotkey("w150 x+10 yp-2", CFG.hotkey)
     catch
         hkCtl := SETGUI.AddHotkey("w150 x+10 yp-2")
-    noHotkeyChk := SETGUI.AddCheckbox("x+10 yp+2" (CFG.hotkey = "" ? " Checked" : ""), "No hotkey")
+    noHotkeyChk := SETGUI.AddCheckbox("x+10 yp+2" (CFG.hotkey = "" ? " Checked" : ""))
+    SETGUI.AddText("x+4 yp", "No hotkey")
     hkCtl.Enabled := (CFG.hotkey != "")
     noHotkeyChk.OnEvent("Click", SETGUI_ToggleHotkey)
     SETGUI_ToggleHotkey(*) {
@@ -685,24 +689,22 @@ ShowSettingsGui() {
     sizeEdit := SETGUI.AddEdit("w60 x+6 yp-4 Number", CFG.headerSize)
     SETGUI.AddUpDown("Range6-72", CFG.headerSize)
 
-    applyStyleChk := SETGUI.AddCheckbox("xm y+14" (CFG.applyStyle ? " Checked" : ""), "Apply Heading 1 style")
-    boldChk := SETGUI.AddCheckbox("x+20 yp" (CFG.headerBold ? " Checked" : ""), "Bold")
+    applyStyleChk := SETGUI.AddCheckbox("xm y+14" (CFG.applyStyle ? " Checked" : ""))
+    SETGUI.AddText("x+4 yp", "Apply Heading 1 style")
+    boldChk := SETGUI.AddCheckbox("x+20 yp" (CFG.headerBold ? " Checked" : ""))
+    SETGUI.AddText("x+4 yp", "Bold")
 
     SETGUI.AddText("xm y+12", "Blank lines below:")
     linesDDL := SETGUI.AddDropDownList("w60 x+10 yp-2 Choose" (CFG.linesBelow + 1), ["0", "1", "2", "3"])
 
-    showBtnChk := SETGUI.AddCheckbox("xm y+14" (CFG.showButton ? " Checked" : ""), "Show floating button")
+    showBtnChk := SETGUI.AddCheckbox("xm y+14" (CFG.showButton ? " Checked" : ""))
+    SETGUI.AddText("x+4 yp", "Show floating button")
 
-    SETGUI.AddText("xm y+12", "API key:")
-    apiKeyEdit := SETGUI.AddEdit("w300 x+10 yp-2 Password", CFG.apiKey)
-    keyShowing := false
-    showKeyBtn := SETGUI.AddButton("w50 x+6 yp-2", "Show")
-    showKeyBtn.OnEvent("Click", SETGUI_ToggleKeyShow)
-    SETGUI_ToggleKeyShow(*) {
-        keyShowing := !keyShowing
-        SendMessage(0x00CC, keyShowing ? 0 : 0x25CF, 0, apiKeyEdit)  ; EM_SETPASSWORDCHAR
-        apiKeyEdit.Redraw()
-        showKeyBtn.Text := keyShowing ? "Hide" : "Show"
+    pendingApiKey := CFG.apiKey
+    apiKeyBtn := SETGUI.AddButton("xm y+16 w120", "API key...")
+    apiKeyBtn.OnEvent("Click", SETGUI_OpenApiKey)
+    SETGUI_OpenApiKey(*) {
+        pendingApiKey := ShowApiKeyDialog(SETGUI, pendingApiKey)
     }
 
     saveBtn := SETGUI.AddButton("xm y+16 w90 Default", "Save")
@@ -733,7 +735,7 @@ ShowSettingsGui() {
         newModel := (selIdx >= 1 && selIdx <= mo.Length) ? mo[selIdx].id : CFG.model
         newFont := fontCombo.Text
         newSize := HDR_ValidSize(sizeEdit.Text)
-        newApiKey := Trim(apiKeyEdit.Text)
+        newApiKey := Trim(pendingApiKey)
         newShowButton := showBtnChk.Value ? true : false
         newApplyStyle := applyStyleChk.Value ? true : false
         newHeaderBold := boldChk.Value ? true : false
@@ -767,8 +769,6 @@ ShowSettingsGui() {
         CFG.headerBold := newHeaderBold
         CFG.linesBelow := newLinesBelow
 
-        SendMessage(0x00CC, 0x25CF, 0, apiKeyEdit)  ; always re-mask before close
-        apiKeyEdit.Redraw()
         SETGUI.Destroy()
         SETGUI := ""
     }
@@ -776,13 +776,77 @@ ShowSettingsGui() {
     SETGUI.OnEvent("Close", SETGUI_Cancel)
     SETGUI_Cancel(*) {
         global SETGUI
-        SendMessage(0x00CC, 0x25CF, 0, apiKeyEdit)  ; always re-mask before close
-        apiKeyEdit.Redraw()
         SETGUI.Destroy()
         SETGUI := ""
     }
 
     SETGUI.Show()
+}
+
+; Small owned dialog for editing the API key in isolation, so the key is
+; never a control on the main Settings window. currentKey is the value to
+; prefill; returns the trimmed value from OK, or currentKey unchanged on
+; Cancel/Close. owner is disabled while this is open and re-enabled after.
+;
+; ROOT CAUSE (task 15): the old inline key Edit on the Settings window used
+; "Password" with no explicit row count. AHK's AddEdit auto-sizes an Edit's
+; height from its initial text when no r/h option is given; a ~100-char key
+; at that width doesn't fit one line by that estimate, so AHK silently added
+; ES_MULTILINE (confirmed live: ControlGetStyle showed ES_MULTILINE set,
+; ES_AUTOHSCROLL cleared, and control height ballooned from ~21px to ~89px,
+; overlapping Save/Cancel). Per the Win32 Edit control docs, ES_PASSWORD is
+; ignored by the OS whenever ES_MULTILINE is also set - so the key rendered
+; in plaintext even though the "Password" option was present and its style
+; bit was in fact set. One cause, both symptoms. Fix: force a fixed single
+; row (r1) below, which keeps AHK from auto-growing the control regardless
+; of key length - confirmed live: same probe with r1 shows ES_MULTILINE
+; cleared, ES_PASSWORD honored, height back to ~39px, no overlap.
+ShowApiKeyDialog(owner, currentKey) {
+    result := currentKey
+    keyShowing := false
+
+    kg := Gui("+ToolWindow +Owner" owner.Hwnd, "API Key")
+    kg.BackColor := "0x2B2B2B"
+    kg.MarginX := 12
+    kg.MarginY := 10
+    kg.SetFont("s9 cWhite")
+    try
+        DllCall("dwmapi\DwmSetWindowAttribute", "ptr", kg.Hwnd, "uint", 20, "int*", 1, "uint", 4)
+
+    kg.AddText("", "Claude API key:")
+    keyEdit := kg.AddEdit("w320 r1 x+10 yp-2 Password", currentKey)
+    showBtn := kg.AddButton("w50 x+6 yp-2", "Show")
+    showBtn.OnEvent("Click", KEY_ToggleShow)
+    KEY_ToggleShow(*) {
+        keyShowing := !keyShowing
+        SendMessage(0x00CC, keyShowing ? 0 : 0x25CF, 0, keyEdit)  ; EM_SETPASSWORDCHAR
+        keyEdit.Redraw()
+        showBtn.Text := keyShowing ? "Hide" : "Show"
+    }
+
+    okBtn := kg.AddButton("xm y+16 w90 Default", "OK")
+    cancelBtn := kg.AddButton("x+10 yp w90", "Cancel")
+    okBtn.OnEvent("Click", KEY_Ok)
+    KEY_Ok(*) {
+        result := Trim(keyEdit.Text)
+        KEY_Close()
+    }
+    cancelBtn.OnEvent("Click", KEY_Cancel)
+    kg.OnEvent("Close", KEY_Cancel)
+    KEY_Cancel(*) {
+        KEY_Close()
+    }
+    KEY_Close() {
+        SendMessage(0x00CC, 0x25CF, 0, keyEdit)  ; always re-mask before close
+        keyEdit.Redraw()
+        kg.Destroy()
+    }
+
+    owner.Opt("+Disabled")
+    kg.Show()
+    WinWaitClose(kg)
+    owner.Opt("-Disabled")
+    return result
 }
 
 Main() {

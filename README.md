@@ -19,8 +19,9 @@ does the same thing: a toast points you at Settings, which opens for you.
 Open the Settings window from the tray icon (**Settings**, the first item) or
 by right-clicking the floating button. It covers the hotkey (or turning it
 off), the model, the header font and size, whether the header uses Heading 1
-style and bold, how many blank lines follow it, showing or hiding the
-floating button, and the API key (with a Show/Hide toggle to check it). Save
+style and bold, how many blank lines follow it, and showing or hiding the
+floating button. The API key is set via Settings -> **API key...**, which
+opens its own small dialog (with a Show/Hide toggle to check it). Save
 applies changes right away - no Reload needed.
 
 Settings are stored in `%APPDATA%\PDFHeaderTool\settings.ini`, which stays
