@@ -357,6 +357,32 @@ GrabCurrentPage() {
     return {ok: true, pdfPath: tmp, pageNum: pageNum + 1, docName: docName}
 }
 
+; --- Word --------------------------------------------------------------
+InsertHeader(hdr) {
+    try
+        word := ComObjActive("Word.Application")
+    catch
+        return {ok: false, err: "Word is not running."}
+    try
+        doc := word.ActiveDocument
+    catch
+        return {ok: false, err: "No document is open in Word."}
+    try {
+        insertAt := word.Selection.Paragraphs.Item(1).Range.Start
+        newRng := doc.Range(insertAt, insertAt)
+        newRng.InsertBefore(hdr.text "`r")
+        hdrRng := doc.Range(insertAt, insertAt + StrLen(hdr.text))
+        hdrRng.Style := -2  ; wdStyleHeading1
+        for mk in hdr.marks {
+            mrng := doc.Range(insertAt + mk.start - 1, insertAt + mk.start - 1 + mk.len)
+            mrng.HighlightColorIndex := 7  ; wdYellow
+        }
+        return {ok: true}
+    } catch as e {
+        return {ok: false, err: "Word rejected the insert: " e.Message}
+    }
+}
+
 ; --- Startup (guarded so tests can #Include this file) ----------------
 Main() {
     ; Filled in by later tasks.
