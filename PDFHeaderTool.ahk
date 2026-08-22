@@ -514,9 +514,12 @@ RunInsert(*) {
 RunInsertCore() {
     global CFG
     if (CFG.apiKey = "") {
-        Toast("No API key yet. Paste it after ApiKey= in the file that just opened, save, then try again.")
-        Run('notepad.exe "' CFG.path '"')
-        return
+        CFG := LoadSettings()
+        if (CFG.apiKey = "") {
+            Toast("No API key yet. Paste it after ApiKey= in the file that just opened and save - or use the tray menu's Settings window - then press again.")
+            Run('notepad.exe "' CFG.path '"')
+            return
+        }
     }
     PROG_Show("Reading page...")
     g := GrabCurrentPage()
@@ -526,6 +529,12 @@ RunInsertCore() {
     }
     b64 := FileToBase64(g.pdfPath)
     try FileDelete(g.pdfPath)
+    try
+        ComObjActive("Word.Application")
+    catch {
+        Toast("Word is not running.")
+        return
+    }
     askMsg := "Asking Claude (page " g.pageNum ")..."
     PROG_Set(askMsg, 10)
     pct := 10
@@ -688,7 +697,7 @@ ShowSettingsGui() {
         newModel := (selIdx >= 1 && selIdx <= mo.Length) ? mo[selIdx].id : CFG.model
         newFont := fontCombo.Text
         newSize := HDR_ValidSize(sizeEdit.Text)
-        newApiKey := apiKeyEdit.Text
+        newApiKey := Trim(apiKeyEdit.Text)
         newShowButton := showBtnChk.Value ? true : false
 
         if newShowButton {
@@ -733,7 +742,7 @@ Main() {
     if CFG.firstRun {
         MsgBox("Welcome. A settings file was created at:`n`n" CFG.path
             . "`n`nNotepad is opening it now - paste your Claude API key directly after ApiKey= and save. "
-            . "You can also change the hotkey (blank = none) and hide the button (ShowButton=0) there.",
+            . "For the hotkey, model, or button, use the Settings window instead (tray menu -> Settings, or right-click the floating button).",
             "PDF Header Tool", "Iconi")
         Run('notepad.exe "' CFG.path '"')
     }

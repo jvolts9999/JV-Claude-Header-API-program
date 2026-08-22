@@ -27,5 +27,6 @@ if !f.ok {
 MsgBox("Page " g.pageNum " of " g.docName "`n`n"
     . "date_of_service: [" f.date "]`n"
     . "provider_name: [" f.provider "]`n"
-    . "note_type: [" f.notetype "]", "API demo", "Iconi")
+    . "note_type: [" f.notetype "]`n"
+    . "is_imaging: [" (f.imaging ? "true" : "false") "]", "API demo", "Iconi")
 ExitApp(0)
