@@ -24,7 +24,9 @@ across all sections in the default sectioned format). The summary is typed
 in its own font and size (separate from the header font), configurable in
 Settings. A free-text **Custom summary instructions** field in Settings is
 appended to every summary prompt whenever it's non-empty - a standing tuning
-knob, e.g. "always flag medication changes." Toggle the Summarize button off
+knob, e.g. "always flag medication changes." The box is multi-line and
+scrollable, so longer standing instructions are easy to read and edit.
+Toggle the Summarize button off
 in Settings (**Show Summarize button**) if you only want the single header
 button.
 

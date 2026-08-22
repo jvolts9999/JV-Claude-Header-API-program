@@ -278,7 +278,8 @@ HDR_FormatClause(format, detail) {
         return HDR_DetailClause(detail)
     return "Structure the summary as labeled lines, including a section ONLY when the source documents it (omit empty sections): 'Subjective:' - history and complaints; 'Physical Exam:' - objective findings; 'Assessment & Plan:' - impressions, decisions, and treatment. "
         . "Prioritize findings of potential medical-legal significance: sentinel events, complications, new or missed findings, deviations from expected care, and turning points in the clinical course. "
-        . HDR_DetailClause(detail, true)
+        . HDR_DetailClause(detail, true) " "
+        . "Plain text only: no markdown, no asterisks or bold markers, and no headings or labels of any kind other than exactly 'Subjective:', 'Physical Exam:', and 'Assessment & Plan:'. "
 }
 
 ; The "no preamble" instruction's wording depends on format: prose still
@@ -288,7 +289,7 @@ HDR_FormatClause(format, detail) {
 ; only.
 HDR_PreambleClause(format) {
     return (HDR_ValidFormat(format) = "prose")
-        ? "No preamble, no headings, no bullet points - just the sentences."
+        ? "Plain text only - no markdown or asterisks. No preamble, no headings, no bullet points - just the sentences."
         : "No preamble and no bullet points."
 }
 
@@ -386,6 +387,8 @@ ExtractText(responseText) {
         if (blk["type"] = "text")
             txt .= blk["text"]
     }
+    txt := Trim(txt)
+    txt := StrReplace(txt, "**", "")
     txt := Trim(txt)
     if (txt = "")
         return {ok: false, err: "The model returned no text."}
@@ -541,7 +544,7 @@ LoadSettings(p := "") {
         summarySize: HDR_ValidSize(Trim(IniRead(p, "Settings", "SummarySize", "12")), 12),
         summaryDetail: HDR_ValidDetail(Trim(IniRead(p, "Settings", "SummaryDetail", "standard"))),
         summaryFormat: HDR_ValidFormat(Trim(IniRead(p, "Settings", "SummaryFormat", "soap"))),
-        customInstructions: Trim(IniRead(p, "Settings", "CustomInstructions", "")),
+        customInstructions: HDR_DecodeMultiline(Trim(IniRead(p, "Settings", "CustomInstructions", ""))),
         beep: Trim(IniRead(p, "Settings", "Beep", "1")) = "1",
         comboInsert: Trim(IniRead(p, "Settings", "ComboInsert", "1")) = "1"}
 }
@@ -572,6 +575,23 @@ HDR_ValidLines(v) {
         return 2
     v := Integer(v)
     return (v < 0 || v > 3) ? 2 : v
+}
+
+; Ini storage is single-line, so a multiline CustomInstructions value is
+; collapsed to a literal backslash-n token before IniWrite and expanded back
+; after IniRead. `r`n and lone `r both normalize to `n first, so CRLF, LF, and
+; old-Mac CR input all collapse the same way. Accepted quirk: a user who
+; types the literal characters backslash-n (not a real newline) round-trips
+; through here as a real newline on the next load - not worth building
+; escape machinery to tell the two apart for this internal tool.
+HDR_EncodeMultiline(v) {
+    v := StrReplace(v, "`r`n", "`n")
+    v := StrReplace(v, "`r", "`n")
+    return StrReplace(v, "`n", "\n")
+}
+
+HDR_DecodeMultiline(v) {
+    return StrReplace(v, "\n", "`n")
 }
 
 ModelOptions() {
@@ -1297,7 +1317,7 @@ ShowSettingsGui() {
     formatDDL := SETGUI.AddDropDownList("w160 x+10 yp-2 Choose" formatIdx, formatItems)
 
     SETGUI.AddText("xm y+12", "Custom summary instructions:").SetFont("cWhite")
-    customEdit := SETGUI.AddEdit("w300 x+10 yp-2", CFG.customInstructions)
+    customEdit := SETGUI.AddEdit("w400 x+10 yp-2 r8 Multi VScroll", CFG.customInstructions)
 
     applyStyleChk := SETGUI.AddCheckbox("xm y+14" (CFG.applyStyle ? " Checked" : ""))
     SETGUI.AddText("x+4 yp", "Apply Heading 1 style").SetFont("cWhite")
@@ -1422,7 +1442,7 @@ ShowSettingsGui() {
         IniWrite(newSummarySize, CFG.path, "Settings", "SummarySize")
         IniWrite(newSummaryDetail, CFG.path, "Settings", "SummaryDetail")
         IniWrite(newSummaryFormat, CFG.path, "Settings", "SummaryFormat")
-        IniWrite(newCustomInstructions, CFG.path, "Settings", "CustomInstructions")
+        IniWrite(HDR_EncodeMultiline(newCustomInstructions), CFG.path, "Settings", "CustomInstructions")
         IniWrite(newShowButton ? "1" : "0", CFG.path, "Settings", "ShowButton")
         IniWrite(newShowSummarize ? "1" : "0", CFG.path, "Settings", "ShowSummarize")
         IniWrite(newApiKey, CFG.path, "Settings", "ApiKey")

@@ -444,5 +444,34 @@ qCustomTxt22 := qReqCustom22["messages"][1]["content"][4]["text"]
 AssertTrue(InStr(qCustomTxt22, "Additional instructions: note all med changes") > 0,
     "custom instructions appear in queue summary prompt when present")
 
+; ---- Task 23: kill markdown artifacts, big custom box ----
+
+; ExtractText strips markdown bold-asterisk artifacts, leaves clean text alone
+tf23 := ExtractText('{"stop_reason":"end_turn","content":[{"type":"text","text":"**Subjective:** back pain"}]}')
+AssertEq(tf23.text, "Subjective: back pain", "extracttext strips markdown asterisks")
+tf23b := ExtractText('{"stop_reason":"end_turn","content":[{"type":"text","text":"Subjective: back pain, unchanged."}]}')
+AssertEq(tf23b.text, "Subjective: back pain, unchanged.", "extracttext leaves asterisk-free text unchanged")
+
+; HDR_EncodeMultiline / HDR_DecodeMultiline - ini storage is single-line, so
+; these normalize real newlines to a literal backslash-n token and back.
+AssertEq(HDR_EncodeMultiline("line one`r`nline two"), "line one\nline two",
+    "encode multiline normalizes crlf to literal backslash n")
+AssertEq(HDR_EncodeMultiline("line one`rline two"), "line one\nline two",
+    "encode multiline normalizes bare cr to literal backslash n")
+AssertEq(HDR_DecodeMultiline("line one\nline two"), "line one`nline two",
+    "decode multiline turns literal backslash n into a real newline")
+AssertEq(HDR_DecodeMultiline(HDR_EncodeMultiline("line one`r`nline two")), "line one`nline two",
+    "encode/decode round trip on embedded crlf lands on a bare lf")
+
+; Prompt tightening: default (soap) format bans markdown/headings other than
+; the three section labels; prose format bans markdown too.
+sReq23 := Json.Parse(BuildSummaryRequestBody(excerpt16, "claude-opus-5"))
+defaultTxt23 := sReq23["messages"][1]["content"][1]["text"]
+AssertTrue(InStr(defaultTxt23, "no headings or labels of any kind other than") > 0,
+    "default soap summary prompt bans markdown headings other than the three labels")
+sReqProse23 := Json.Parse(BuildSummaryRequestBody(excerpt16, "claude-opus-5", "standard", "prose"))
+proseTxt23 := sReqProse23["messages"][1]["content"][1]["text"]
+AssertTrue(InStr(proseTxt23, "no markdown") > 0, "prose summary prompt bans markdown")
+
 FileAppend((TestFails ? "FAILED " TestFails "/" TestCount : "PASSED " TestCount) " tests`n", "*")
 ExitApp(TestFails)
