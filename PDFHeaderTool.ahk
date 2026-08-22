@@ -1300,6 +1300,8 @@ HDR_DragEnd(wParam, lParam, msg, hwnd) {
     WinGetPos(&x, &y, , , BTNGUI)
     IniWrite(x, CFG.path, "Settings", "ButtonX")
     IniWrite(y, CFG.path, "Settings", "ButtonY")
+    CFG.btnX := x
+    CFG.btnY := y
 }
 
 ; Gui-level ContextMenu event: GuiCtrlObj identifies which control (if any)
@@ -1567,57 +1569,83 @@ ShowSettingsGui() {
         }
 
         oldHotkey := CFG.hotkey
+        oldSummarizeHotkey := CFG.summarizeHotkey
+        oldQueueHotkey := CFG.queueHotkey
+        oldSettingsHotkey := CFG.settingsHotkey
+
+        ; Re-binds all four OLD hotkeys to their original handlers - used to
+        ; unwind a failed Save below, so a failed attempt leaves the hotkeys
+        ; exactly as they were.
+        RestoreOldHotkeys() {
+            if (oldHotkey != "")
+                try Hotkey(oldHotkey, RunInsert, "On")
+            if (oldSummarizeHotkey != "")
+                try Hotkey(oldSummarizeHotkey, RunSummarize, "On")
+            if (oldQueueHotkey != "")
+                try Hotkey(oldQueueHotkey, RunQueue, "On")
+            if (oldSettingsHotkey != "")
+                try Hotkey(oldSettingsHotkey, RunOpenSettings, "On")
+        }
+        ; Turns back off whichever NEW hotkeys this Save already bound
+        ; (boundNews), restores all four olds, and reports the same
+        ; per-hotkey message as before.
+        UnwindAndFail(badHotkey) {
+            for k in boundNews
+                try Hotkey(k, "Off")
+            RestoreOldHotkeys()
+            MsgBox("'" badHotkey "' is not a usable hotkey.", "PDF Header Tool", "Icon!")
+        }
+
+        ; All four OLDs are turned off before any NEW is turned on (rather
+        ; than old-Off/new-On per key in sequence) so a later key's old-Off
+        ; can never clobber an earlier key's just-made new-On binding - e.g.
+        ; swapping insert F8->F9 and summarize F9->F8 in one Save (both pass
+        ; the duplicate guard above, since the four NEW values stay distinct)
+        ; used to leave F9 silently unbound: insert's new-On F9 ran, then
+        ; summarize's old-Off F9 turned that same key back off right after.
         if (oldHotkey != "")
             try Hotkey(oldHotkey, "Off")
+        if (oldSummarizeHotkey != "")
+            try Hotkey(oldSummarizeHotkey, "Off")
+        if (oldQueueHotkey != "")
+            try Hotkey(oldQueueHotkey, "Off")
+        if (oldSettingsHotkey != "")
+            try Hotkey(oldSettingsHotkey, "Off")
+
+        boundNews := []
         if (newHotkey != "") {
             try {
                 Hotkey(newHotkey, RunInsert, "On")
+                boundNews.Push(newHotkey)
             } catch {
-                if (oldHotkey != "")
-                    try Hotkey(oldHotkey, RunInsert, "On")
-                MsgBox("'" newHotkey "' is not a usable hotkey.", "PDF Header Tool", "Icon!")
+                UnwindAndFail(newHotkey)
                 return
             }
         }
-
-        oldSummarizeHotkey := CFG.summarizeHotkey
-        if (oldSummarizeHotkey != "")
-            try Hotkey(oldSummarizeHotkey, "Off")
         if (newSummarizeHotkey != "") {
             try {
                 Hotkey(newSummarizeHotkey, RunSummarize, "On")
+                boundNews.Push(newSummarizeHotkey)
             } catch {
-                if (oldSummarizeHotkey != "")
-                    try Hotkey(oldSummarizeHotkey, RunSummarize, "On")
-                MsgBox("'" newSummarizeHotkey "' is not a usable hotkey.", "PDF Header Tool", "Icon!")
+                UnwindAndFail(newSummarizeHotkey)
                 return
             }
         }
-
-        oldQueueHotkey := CFG.queueHotkey
-        if (oldQueueHotkey != "")
-            try Hotkey(oldQueueHotkey, "Off")
         if (newQueueHotkey != "") {
             try {
                 Hotkey(newQueueHotkey, RunQueue, "On")
+                boundNews.Push(newQueueHotkey)
             } catch {
-                if (oldQueueHotkey != "")
-                    try Hotkey(oldQueueHotkey, RunQueue, "On")
-                MsgBox("'" newQueueHotkey "' is not a usable hotkey.", "PDF Header Tool", "Icon!")
+                UnwindAndFail(newQueueHotkey)
                 return
             }
         }
-
-        oldSettingsHotkey := CFG.settingsHotkey
-        if (oldSettingsHotkey != "")
-            try Hotkey(oldSettingsHotkey, "Off")
         if (newSettingsHotkey != "") {
             try {
                 Hotkey(newSettingsHotkey, RunOpenSettings, "On")
+                boundNews.Push(newSettingsHotkey)
             } catch {
-                if (oldSettingsHotkey != "")
-                    try Hotkey(oldSettingsHotkey, RunOpenSettings, "On")
-                MsgBox("'" newSettingsHotkey "' is not a usable hotkey.", "PDF Header Tool", "Icon!")
+                UnwindAndFail(newSettingsHotkey)
                 return
             }
         }
@@ -1841,8 +1869,9 @@ Main() {
         MakeButton()
     A_TrayMenu.Insert("1&", "Settings", (*) => ShowSettingsGui())
     A_TrayMenu.Insert("2&", "Insert header now", RunInsert)
-    A_TrayMenu.Insert("3&", "Open settings file", (*) => Run('notepad.exe "' CFG.path '"'))
-    A_TrayMenu.Insert("4&", "Reload", (*) => Reload())
+    A_TrayMenu.Insert("3&", "Clear queue", (*) => RunQueueClear())
+    A_TrayMenu.Insert("4&", "Open settings file", (*) => Run('notepad.exe "' CFG.path '"'))
+    A_TrayMenu.Insert("5&", "Reload", (*) => Reload())
     Persistent(true)
 }
 

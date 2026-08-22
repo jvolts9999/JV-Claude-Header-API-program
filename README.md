@@ -34,8 +34,10 @@ By default, clicking **Summarize text** (or its hotkey) first inserts the
 header, then the summary below it - one press for the whole entry. Turn this
 off in Settings (**One press: header + summary**) to run the two
 independently, as before. If the header phase fails, the combo stops there -
-no summary is attempted. **Insert header** is always header-only, regardless
-of this toggle.
+no summary is attempted. If the summary phase fails after the header was
+already inserted, press Ctrl+Z once to remove the header before retrying - a
+retry inserts a fresh header. **Insert header** is always header-only,
+regardless of this toggle.
 
 A third button, **Queue Summary**, sits above Summarize text (shown together,
 hidden together). Click it to queue the current PDF page - the label updates
