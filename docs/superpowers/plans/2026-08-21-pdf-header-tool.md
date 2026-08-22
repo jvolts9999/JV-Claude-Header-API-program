@@ -1717,3 +1717,40 @@ tests).
 **Checkpoint 8b (John):** blank lines below a header are 12pt (type into one to confirm);
 chime sounds Wispr-like; Summary detail dropdown changes summary length across all three
 modes. Plus anything from checkpoint 8 not yet confirmed. Then merge + push.
+
+### Task 20 (John 2026-08-22): one-press header + summary combo
+
+John's ruling: a Settings toggle (DEFAULT ON — the requested behavior; unchecking keeps
+the functions separate) so that clicking `Summarize text` (or its hotkey) FIRST inserts
+the header, then the summary below it. Existing geometry already yields the right layout:
+header above the cursor's paragraph + blank lines, summary at the cursor.
+
+**Files:** `PDFHeaderTool.ahk`, `tests\test_core.ahk`, `README.md`.
+
+**Changes:**
+
+1. Ini `ComboInsert=1` (default on); LoadSettings field `comboInsert` (bool). Settings
+   checkbox (dark pattern) `One press: header + summary` placed near the Summarize
+   controls; persisted; CFG updated live.
+2. `RunInsertCore` gains a Boolean return: `true` only when the header was actually
+   inserted (the existing `w.ok` success path); every early return / failure path returns
+   `false`. No caller besides the new combo logic inspects it (RunInsert ignores it —
+   verify unchanged behavior).
+3. `RunSummarize`'s try block: when `CFG.comboInsert` is true, call `RunInsertCore()`
+   FIRST; if it returns false, STOP (no summary — the header phase already toasted/chimed
+   its own failure). On true, proceed to `RunSummarizeCore(&savedClip)` as today. When the
+   toggle is off: exactly today's behavior. BUSY covers the whole combo (single window);
+   PROG/toasts/chimes of each phase run as they already do (two chimes per combo press is
+   accepted v1 behavior — John judges at checkpoint).
+4. Interplay notes (verify by reading, no extra code expected): queue non-empty -> header
+   phase reads first queued page (does not consume), summary phase summarizes the queue
+   and clears it on success — exactly the intended multi-page-note one-press flow.
+   `Insert header` button/hotkey remains header-only regardless of the toggle.
+
+**TDD (pure parts):** LoadSettings `comboInsert` default true + override 0 (2 assertions).
+The orchestration is COM-bound — code-reviewed + checkpoint only. Existing tests
+unmodified; implementer recounts (163 + 2 = 165 expected), GREEN must match, exit 0.
+
+**Checkpoint 8c (John, cumulative with 8b):** with combo ON: one press on a queued
+multi-page note -> header + blanks + summary; header-phase failure stops the combo; with
+combo OFF: buttons behave separately as before. Then merge + push.
