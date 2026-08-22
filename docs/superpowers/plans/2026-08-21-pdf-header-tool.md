@@ -1900,3 +1900,58 @@ match, exit 0. Existing tests unmodified unless a preamble-phrase assertion conf
 **Checkpoint 9b (John):** summaries show plain `Subjective:` labels, no asterisks, no
 Encounter heading; custom box is big and scrolls; a multi-line custom instruction survives
 Save -> reopen -> next summary. Then the branch's final whole-branch review, merge, push.
+
+### Task 24 (John 2026-08-22): real Wispr sound files + sound picker
+
+John wants the completion sound improved. Discovery: Wispr Flow ships plain WAVs at
+`%LOCALAPPDATA%\WisprFlow\app-<version>\resources\assets\sounds\` including
+`notifv1\success.wav`/`notifv1\error.wav`, `notifv2\success.wav`/`notifv2\error.wav`, and
+`dictation-stop.wav`. Design: play the real files; cache copies under the tool's own
+AppData so Wispr updates/uninstalls can't break it; Settings picker + Test button so John
+chooses by ear.
+
+**Files:** `PDFHeaderTool.ahk`, `tests\test_core.ahk`, `README.md`.
+
+**Changes:**
+
+1. Ini `SoundScheme=wispr2` (values `wispr2|wispr1|dictstop|beep`, clamp helper
+   `HDR_ValidScheme(v)` case-insensitive -> `wispr2` on garbage); LoadSettings field
+   `soundScheme`.
+2. Pure helper `HDR_SchemeFiles(scheme)` -> Map with `success`/`error` RELATIVE source
+   paths within Wispr's sounds dir (`wispr2` -> `notifv2\success.wav`/`notifv2\error.wav`;
+   `wispr1` -> notifv1 pair; `dictstop` -> `dictation-stop.wav` for success +
+   `notifv1\error.wav` for error; `beep` -> empty map). Unit-testable.
+3. `HDR_WisprSoundsDir()`: scan `%LOCALAPPDATA%\WisprFlow\app-*` folders, pick the
+   LEXICALLY LAST (newest version), return its `resources\assets\sounds` path, `""` if
+   absent. `HDR_EnsureSounds(scheme)`: for non-beep schemes, ensure
+   `%APPDATA%\PDFHeaderTool\sounds\<scheme>-success.wav`/`-error.wav` exist by FileCopy
+   from the Wispr dir (overwrite-if-missing only, `try`-wrapped); returns the cached
+   Map of local paths or empty on failure.
+4. `HDR_Chime(ok)` rework: gate on `CFG.beep` as now; when `CFG.soundScheme != "beep"`,
+   `files := HDR_EnsureSounds(...)`; if the needed file exists -> `try SoundPlay(file)`
+   (async, no wait) and return; ANY failure (no Wispr, copy failed, SoundPlay throw) ->
+   fall through to the existing two-tone SoundBeep pair (never silent, never an error
+   dialog).
+5. Settings GUI (dark pattern): `Sound` DDL with ARRAY items
+   `["Wispr chime v2", "Wispr chime v1", "Wispr dictation stop", "Classic beep"]`
+   mapping wispr2/wispr1/dictstop/beep (Choose from CFG), placed by the Completion-beep
+   checkbox; a small `Test` button beside it that plays the CURRENTLY SELECTED scheme's
+   success sound via the same HDR_EnsureSounds/SoundPlay path (or the two-tone when
+   `beep`) WITHOUT saving — the one intentional in-GUI audio action. Save persists the
+   token; CFG updated live.
+6. If Wispr is not installed (dir ""), the three Wispr options stay listed but selecting
+   them simply falls back to the two-tone at chime time (change 4's fallback covers it) —
+   no error surfaces. README notes the sound options + the cached copies location.
+
+**TDD (pure parts):** RED then GREEN. New assertions: `HDR_ValidScheme` (3: passthrough,
+case-insensitive, garbage->wispr2); LoadSettings `soundScheme` default + override (2);
+`HDR_SchemeFiles` all four schemes incl. beep->empty (4). ~9 new; implementer recounts
+(191 + 9 = 200 expected), GREEN must match, exit 0. HDR_WisprSoundsDir/EnsureSounds/
+SoundPlay are filesystem/audio — implementer MAY verify the dir-scan and FileCopy against
+the REAL Wispr path read-only/copy-to-temp (no audio playback during the task; the Test
+button is John's).
+
+**Checkpoint 10 (John):** Settings -> Sound -> press Test on each option, pick by ear;
+Save; a real summarize/header completion plays the chosen sound; failure sound on a
+forced error (e.g. Acrobat closed). Then the branch's final whole-branch review, merge,
+push.
