@@ -228,7 +228,8 @@ BuildRequestBody(b64pdf, model) {
         . '"note_type":{"type":["string","null"]}},'
         . '"required":["date_of_service","provider_name","note_type"],'
         . '"additionalProperties":false}'
-    return '{"model":"' Json.Escape(model) '","max_tokens":16000,"fallbacks":"default",'
+    fb := (SubStr(model, 1, 13) = "claude-opus-5" || SubStr(model, 1, 12) = "claude-fable") ? '"fallbacks":"default",' : ""
+    return '{"model":"' Json.Escape(model) '","max_tokens":16000,' fb
         . '"messages":[{"role":"user","content":['
         . '{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"' b64pdf '"}},'
         . '{"type":"text","text":"' Json.Escape(prompt) '"}]}],'
@@ -290,7 +291,8 @@ CallClaude(body, apiKey, timeoutSec := 60) {
     req.SetRequestHeader("Content-Type", "application/json")
     req.SetRequestHeader("x-api-key", apiKey)
     req.SetRequestHeader("anthropic-version", "2023-06-01")
-    req.SetRequestHeader("anthropic-beta", "server-side-fallback-2026-07-01")
+    if InStr(body, '"fallbacks"')
+        req.SetRequestHeader("anthropic-beta", "server-side-fallback-2026-07-01")
     req.Send(body)
     return {status: req.Status, text: req.ResponseText}
 }

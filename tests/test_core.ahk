@@ -134,5 +134,15 @@ AssertEq(cfg.hotkey, "", "settings blank hotkey allowed")
 AssertEq(cfg.showButton ? 1 : 0, 0, "settings button off")
 FileDelete(sPath)
 
+; ---- BuildRequestBody model-gated fallbacks (Task 6b) ----
+reqCheap := Json.Parse(BuildRequestBody("QUJD", "claude-haiku-4-5"))
+AssertEq(reqCheap.Has("fallbacks") ? 1 : 0, 0, "no fallbacks key for cheap model")
+AssertEq(reqCheap["model"], "claude-haiku-4-5", "cheap model passthrough")
+AssertEq(reqCheap["max_tokens"], 16000, "cheap model keeps max_tokens")
+reqSonnet := Json.Parse(BuildRequestBody("QUJD", "claude-sonnet-5"))
+AssertEq(reqSonnet.Has("fallbacks") ? 1 : 0, 0, "no fallbacks key for sonnet")
+reqOpus := Json.Parse(BuildRequestBody("QUJD", "claude-opus-5"))
+AssertEq(reqOpus["fallbacks"], "default", "opus keeps fallbacks default")
+
 FileAppend((TestFails ? "FAILED " TestFails "/" TestCount : "PASSED " TestCount) " tests`n", "*")
 ExitApp(TestFails)
