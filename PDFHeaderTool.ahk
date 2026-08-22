@@ -212,6 +212,10 @@ BuildHeader(dateRaw, provider, noteType, includeProvider := true) {
 }
 
 ; --- Claude API --------------------------------------------------------
+ModelWantsFallbacks(model) {
+    return (SubStr(model, 1, 13) = "claude-opus-5" || SubStr(model, 1, 12) = "claude-fable")
+}
+
 BuildRequestBody(b64pdf, model) {
     static prompt := "This is one page of a medical record. Extract: "
         . "(1) date_of_service - the date this note, encounter, or study took place; never a print, fax, or signature date. "
@@ -226,12 +230,22 @@ BuildRequestBody(b64pdf, model) {
         . '"is_imaging":{"type":"boolean"}},'
         . '"required":["date_of_service","provider_name","note_type","is_imaging"],'
         . '"additionalProperties":false}'
-    fb := (SubStr(model, 1, 13) = "claude-opus-5" || SubStr(model, 1, 12) = "claude-fable") ? '"fallbacks":"default",' : ""
+    fb := ModelWantsFallbacks(model) ? '"fallbacks":"default",' : ""
     return '{"model":"' Json.Escape(model) '","max_tokens":16000,' fb
         . '"messages":[{"role":"user","content":['
         . '{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"' b64pdf '"}},'
         . '{"type":"text","text":"' Json.Escape(prompt) '"}]}],'
         . '"output_config":{"format":{"type":"json_schema","schema":' schema '}}}'
+}
+
+BuildSummaryRequestBody(excerpt, model) {
+    static prompt := "Summarize the following excerpt from a medical record for a medical-legal chronology. "
+        . "Write 2-4 sentences of plain prose covering what happened, the key findings, and the plan. "
+        . "No preamble, no headings, no bullet points - just the sentences. Excerpt:"
+    fb := ModelWantsFallbacks(model) ? '"fallbacks":"default",' : ""
+    return '{"model":"' Json.Escape(model) '","max_tokens":16000,' fb
+        . '"messages":[{"role":"user","content":['
+        . '{"type":"text","text":"' Json.Escape(prompt) '\n\n' Json.Escape(excerpt) '"}]}]}'
 }
 
 ExtractFields(responseText) {
@@ -263,6 +277,30 @@ ExtractFields(responseText) {
         provider: HDR_Field(f, "provider_name"),
         notetype: HDR_Field(f, "note_type"),
         imaging: imaging}
+}
+
+ExtractText(responseText) {
+    try
+        resp := Json.Parse(responseText)
+    catch
+        return {ok: false, err: "Unreadable API response."}
+    if (resp is Map) && resp.Has("error")
+        return {ok: false, err: "API error: " resp["error"]["message"]}
+    if !(resp is Map) || !resp.Has("content")
+        return {ok: false, err: "Unexpected API response shape."}
+    if (resp.Has("stop_reason") && resp["stop_reason"] = "refusal")
+        return {ok: false, err: "The model declined to summarize this text."}
+    if (resp.Has("stop_reason") && resp["stop_reason"] = "max_tokens")
+        return {ok: false, err: "The response was cut off. Try again."}
+    txt := ""
+    for blk in resp["content"] {
+        if (blk["type"] = "text")
+            txt .= blk["text"]
+    }
+    txt := Trim(txt)
+    if (txt = "")
+        return {ok: false, err: "The model returned no text."}
+    return {ok: true, text: txt}
 }
 
 HDR_Field(m, k) {
@@ -329,6 +367,7 @@ LoadSettings(p := "") {
             . "Hotkey=F8`n"
             . "Model=claude-opus-5`n"
             . "ShowButton=1`n"
+            . "ShowSummarize=1`n"
             . "ButtonX=`n"
             . "ButtonY=`n"
             . "HeaderFont=Times New Roman`n"
@@ -342,6 +381,7 @@ LoadSettings(p := "") {
         hotkey: Trim(IniRead(p, "Settings", "Hotkey", "F8")),
         model: Trim(IniRead(p, "Settings", "Model", "claude-opus-5")),
         showButton: Trim(IniRead(p, "Settings", "ShowButton", "1")) = "1",
+        showSummarize: Trim(IniRead(p, "Settings", "ShowSummarize", "1")) = "1",
         btnX: Trim(IniRead(p, "Settings", "ButtonX", "")),
         btnY: Trim(IniRead(p, "Settings", "ButtonY", "")),
         headerFont: Trim(IniRead(p, "Settings", "HeaderFont", "Times New Roman")),
@@ -583,13 +623,95 @@ RunInsertCore() {
     Toast(w.ok ? hdr.text : w.err)
 }
 
+RunSummarize(*) {
+    global BUSY
+    if BUSY
+        return
+    BUSY := true
+    savedClip := ""
+    try
+        savedClip := RunSummarizeCore()
+    catch as e
+        Toast("Error: " e.Message)
+    finally {
+        BUSY := false
+        PROG_Hide()
+        if (savedClip != "")
+            A_Clipboard := savedClip
+    }
+}
+
+RunSummarizeCore() {
+    global CFG
+    if (CFG.apiKey = "") {
+        CFG := LoadSettings()
+        if (CFG.apiKey = "") {
+            Toast("No API key yet - paste it into Settings and save.")
+            ShowSettingsGui()
+            return ""
+        }
+    }
+    try
+        word := ComObjActive("Word.Application")
+    catch {
+        Toast("Word is not running.")
+        return ""
+    }
+    savedClip := ClipboardAll()
+    A_Clipboard := ""
+    if WinExist("ahk_exe Acrobat.exe") && !WinActive("ahk_exe Acrobat.exe") {
+        WinActivate("ahk_exe Acrobat.exe")
+        Sleep(150)
+    }
+    Send("^c")
+    ClipWait(1)
+    excerpt := A_Clipboard
+    if (excerpt = "") {
+        Toast("Select text in the PDF first.")
+        return savedClip
+    }
+    if (StrLen(excerpt) > 200000) {
+        Toast("Selection is too large.")
+        return savedClip
+    }
+    PROG_Show("Summarizing...")
+    pct := 10
+    TickSum() {
+        pct := Min(pct + 10, 90)
+        PROG_Set("Summarizing...", pct)
+    }
+    r := CallClaude(BuildSummaryRequestBody(excerpt, CFG.model), CFG.apiKey, 60, TickSum)
+    if (r.status = 0) {
+        Toast(r.err)
+        return savedClip
+    }
+    t := ExtractText(r.text)
+    if (r.status != 200) {
+        Toast(t.ok ? "API error HTTP " r.status : t.err)
+        return savedClip
+    }
+    if !t.ok {
+        Toast(t.err)
+        return savedClip
+    }
+    word.Selection.TypeText(t.text)
+    Toast("Summary inserted.")
+    return savedClip
+}
+
 MakeButton() {
     global CFG, BTNGUI
     BTNGUI := Gui("+AlwaysOnTop -Caption +ToolWindow", "PDF Header")
     BTNGUI.MarginX := 8
     BTNGUI.MarginY := 8
     BTNGUI.SetFont("s10 bold")
-    b := BTNGUI.AddButton("w110 h34", "Insert header")
+    if CFG.showSummarize {
+        sb := BTNGUI.AddButton("w110 h34", "Summarize text")
+        sb.OnEvent("Click", RunSummarize)
+        b := BTNGUI.AddButton("w110 h34 y+8", "Insert header")
+    } else {
+        b := BTNGUI.AddButton("w110 h34", "Insert header")
+    }
     b.OnEvent("Click", RunInsert)
     BTNGUI.OnEvent("ContextMenu", (*) => ShowSettingsGui())
     ; Drag anywhere on the window edge (the margin around the button).
@@ -705,6 +827,8 @@ ShowSettingsGui() {
 
     showBtnChk := SETGUI.AddCheckbox("xm y+14" (CFG.showButton ? " Checked" : ""))
     SETGUI.AddText("x+4 yp", "Show floating button").SetFont("cWhite")
+    showSummarizeChk := SETGUI.AddCheckbox("x+20 yp" (CFG.showSummarize ? " Checked" : ""))
+    SETGUI.AddText("x+4 yp", "Show Summarize button").SetFont("cWhite")
 
     pendingApiKey := CFG.apiKey
     apiKeyBtn := SETGUI.AddButton("xm y+16 w120", "API key...")
@@ -743,23 +867,17 @@ ShowSettingsGui() {
         newSize := HDR_ValidSize(sizeEdit.Text)
         newApiKey := Trim(pendingApiKey)
         newShowButton := showBtnChk.Value ? true : false
+        newShowSummarize := showSummarizeChk.Value ? true : false
         newApplyStyle := applyStyleChk.Value ? true : false
         newHeaderBold := boldChk.Value ? true : false
         newLinesBelow := HDR_ValidLines(linesDDL.Value - 1)
-
-        if newShowButton {
-            if (BTNGUI = "")
-                MakeButton()
-            else
-                BTNGUI.Show("NoActivate")
-        } else if (BTNGUI != "")
-            BTNGUI.Hide()
 
         IniWrite(newHotkey, CFG.path, "Settings", "Hotkey")
         IniWrite(newModel, CFG.path, "Settings", "Model")
         IniWrite(newFont, CFG.path, "Settings", "HeaderFont")
         IniWrite(newSize, CFG.path, "Settings", "HeaderSize")
         IniWrite(newShowButton ? "1" : "0", CFG.path, "Settings", "ShowButton")
+        IniWrite(newShowSummarize ? "1" : "0", CFG.path, "Settings", "ShowSummarize")
         IniWrite(newApiKey, CFG.path, "Settings", "ApiKey")
         IniWrite(newApplyStyle ? "1" : "0", CFG.path, "Settings", "ApplyHeadingStyle")
         IniWrite(newHeaderBold ? "1" : "0", CFG.path, "Settings", "HeaderBold")
@@ -770,10 +888,20 @@ ShowSettingsGui() {
         CFG.headerFont := newFont
         CFG.headerSize := newSize
         CFG.showButton := newShowButton
+        CFG.showSummarize := newShowSummarize
         CFG.apiKey := newApiKey
         CFG.applyStyle := newApplyStyle
         CFG.headerBold := newHeaderBold
         CFG.linesBelow := newLinesBelow
+
+        ; Layout (single vs. stacked buttons) depends on CFG.showSummarize, so
+        ; the window is always rebuilt from scratch rather than reused/shown.
+        if (BTNGUI != "") {
+            BTNGUI.Destroy()
+            BTNGUI := ""
+        }
+        if newShowButton
+            MakeButton()
 
         SETGUI.Destroy()
         SETGUI := ""

@@ -7,6 +7,13 @@ are simply omitted.
 Imaging study reports (MRI, CT, X-ray, etc.) insert a two-part header - date
 and study type, no provider.
 
+A second floating button, **Summarize text**, sits directly above the header
+button. Select text in the PDF in Acrobat and click it (it auto-copies the
+selection - no need to press Ctrl+C yourself) to get a 2-4 sentence plain-prose
+summary - what happened, key findings, plan - typed into Word at the cursor.
+Uses the same Claude model as the header button. Toggle it off in Settings
+(**Show Summarize button**) if you only want the single header button.
+
 ## Run
 
 Double-click `PDFHeaderTool.ahk` (requires AutoHotkey v2). First run creates
@@ -20,7 +27,8 @@ Open the Settings window from the tray icon (**Settings**, the first item) or
 by right-clicking the floating button. It covers the hotkey (or turning it
 off), the model, the header font and size, whether the header uses Heading 1
 style and bold, how many blank lines follow it, and showing or hiding the
-floating button. The API key is set via Settings -> **API key...**, which
+floating button and the Summarize button. The API key is set via Settings ->
+**API key...**, which
 opens its own small dialog (with a Show/Hide toggle to check it). Save
 applies changes right away - no Reload needed.
 
@@ -36,6 +44,7 @@ hand-editable if you prefer:
 - `HeaderBold` - `1` forces the header bold, `0` leaves the style's own weight untouched
 - `LinesBelow` - blank lines inserted after the header, `0`-`3`, default `2`
 - `ShowButton` - `1` shows the floating button, `0` hides it
+- `ShowSummarize` - `1` shows the Summarize text button above it, `0` hides just that one
 - `ButtonX`/`ButtonY` - remembered button position (set automatically)
 
 ## Tests

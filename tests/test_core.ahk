@@ -209,5 +209,47 @@ FileDelete(sPath14)
 AssertEq(HDR_ValidLines(3), 3, "validlines passthrough")
 AssertEq(HDR_ValidLines(""), 2, "validlines empty")
 
+; ---- Task 16: Summarize selection ----
+
+; LoadSettings showSummarize
+sPath16 := A_Temp "\pdfheadertool_settings_t16.ini"
+try FileDelete(sPath16)
+cfg16 := LoadSettings(sPath16)
+AssertEq(cfg16.showSummarize ? 1 : 0, 1, "settings default show summarize on")
+IniWrite("0", sPath16, "Settings", "ShowSummarize")
+cfg16 := LoadSettings(sPath16)
+AssertEq(cfg16.showSummarize ? 1 : 0, 0, "settings show summarize off override")
+FileDelete(sPath16)
+
+; ModelWantsFallbacks
+AssertEq(ModelWantsFallbacks("claude-opus-5") ? 1 : 0, 1, "modelwantsfallbacks true for opus")
+AssertEq(ModelWantsFallbacks("claude-haiku-4-5") ? 1 : 0, 0, "modelwantsfallbacks false for haiku")
+
+; BuildSummaryRequestBody
+excerpt16 := "Patient reports ongoing low back pain radiating to the left leg."
+sReq := Json.Parse(BuildSummaryRequestBody(excerpt16, "claude-opus-5"))
+AssertEq(sReq["model"], "claude-opus-5", "summary req model passthrough")
+AssertEq(sReq["max_tokens"], 16000, "summary req max_tokens")
+AssertEq(sReq.Has("fallbacks") ? 1 : 0, 1, "summary req fallbacks present for opus")
+sReqCheap := Json.Parse(BuildSummaryRequestBody(excerpt16, "claude-haiku-4-5"))
+AssertEq(sReqCheap.Has("fallbacks") ? 1 : 0, 0, "summary req fallbacks absent for haiku")
+promptTxt := sReq["messages"][1]["content"][1]["text"]
+AssertTrue(InStr(promptTxt, "2-4 sentences") > 0 && InStr(promptTxt, excerpt16) > 0,
+    "summary prompt has guidance and excerpt")
+AssertEq(sReq.Has("output_config") ? 1 : 0, 0, "summary req has no output_config")
+
+; ExtractText
+tOk := '{"stop_reason":"end_turn","content":[{"type":"thinking","thinking":""},'
+    . '{"type":"text","text":"Patient was seen for back pain. MRI showed a disc bulge. Plan is physical therapy."}]}'
+tf := ExtractText(tOk)
+AssertEq(tf.text, "Patient was seen for back pain. MRI showed a disc bulge. Plan is physical therapy.",
+    "extracttext happy path with leading thinking block")
+tf := ExtractText('{"stop_reason":"refusal","content":[]}')
+AssertEq(tf.ok ? 1 : 0, 0, "extracttext refusal not ok")
+tf := ExtractText('{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}')
+AssertEq(tf.ok ? 1 : 0, 0, "extracttext api error not ok")
+tf := ExtractText('{"stop_reason":"end_turn","content":[{"type":"text","text":"   "}]}')
+AssertEq(tf.err, "The model returned no text.", "extracttext empty content after trim")
+
 FileAppend((TestFails ? "FAILED " TestFails "/" TestCount : "PASSED " TestCount) " tests`n", "*")
 ExitApp(TestFails)
