@@ -739,11 +739,14 @@ HDR_EnsureSounds(scheme) {
 }
 
 ; Shared by HDR_Chime and the Settings Test button: tries to play scheme's
-; kind ("success"/"error") via HDR_EnsureSounds + SoundPlay (async - SoundPlay
-; doesn't wait unless told to). Returns true if it actually played, false on
-; ANY failure (beep scheme, not installed, copy failed, SoundPlay itself
-; threw) so the caller can fall through to its own two-tone beep - this path
-; never goes silent and never surfaces an error dialog.
+; kind ("success"/"error") via HDR_EnsureSounds + winmm PlaySound. PlaySound
+; (not MCI SoundPlay) because async MCI playback proved unreliable here while
+; PlaySound is the OS's native wav path: 0x20003 = SND_FILENAME | SND_ASYNC |
+; SND_NODEFAULT (async, and NODEFAULT makes it return 0 on failure instead of
+; playing the system default ding). Returns true only if Windows accepted the
+; play, false on ANY failure (beep scheme, not installed, copy failed,
+; PlaySound refused) so the caller falls through to its own two-tone beep -
+; this path never goes silent and never surfaces an error dialog.
 HDR_PlaySoundFile(scheme, kind) {
     if (scheme = "beep")
         return false
@@ -751,8 +754,7 @@ HDR_PlaySoundFile(scheme, kind) {
     if !files.Has(kind)
         return false
     try {
-        SoundPlay(files[kind])
-        return true
+        return DllCall("winmm\PlaySound", "str", files[kind], "ptr", 0, "uint", 0x20003) != 0
     } catch {
         return false
     }
