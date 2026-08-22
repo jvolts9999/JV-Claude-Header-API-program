@@ -457,13 +457,14 @@ global SETGUI := ""
 ; near the mouse. PROG_Show creates the Gui once and reuses it on later runs.
 PROG_Show(text) {
     global PROGGUI, PROGTEXT, PROGBAR, BTNGUI
+    static stripW := 260, stripInset := 6
     if (PROGGUI = "") {
         PROGGUI := Gui("+AlwaysOnTop -Caption +ToolWindow", "PDF Header Progress")
         PROGGUI.MarginX := 10
         PROGGUI.MarginY := 8
         PROGGUI.SetFont("s9")
-        PROGTEXT := PROGGUI.AddText("w260", text)
-        PROGBAR := PROGGUI.AddProgress("w260 h16", 0)
+        PROGTEXT := PROGGUI.AddText("w" stripW, text)
+        PROGBAR := PROGGUI.AddProgress("w" stripW " h16", 0)
     } else {
         PROGTEXT.Text := text
         PROGBAR.Value := 0
@@ -474,8 +475,10 @@ PROG_Show(text) {
         PROGBAR.Move(6, , bw - 12)
         PROGGUI.Show("x" bx " y" (by + bh) " w" bw " NoActivate")
     } else {
+        PROGTEXT.Move(stripInset, , stripW)
+        PROGBAR.Move(stripInset, , stripW)
         MouseGetPos(&mx, &my)
-        PROGGUI.Show("x" (mx + 16) " y" (my + 16) " NoActivate")
+        PROGGUI.Show("x" (mx + 16) " y" (my + 16) " w" (stripW + stripInset * 2) " NoActivate")
     }
 }
 
