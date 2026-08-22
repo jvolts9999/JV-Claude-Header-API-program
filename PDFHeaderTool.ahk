@@ -352,6 +352,25 @@ HDR_ValidSize(v) {
     return (v < 6 || v > 72) ? 20 : v
 }
 
+ModelOptions() {
+    return [
+        {id: "claude-opus-5", label: "Opus 5 - most accurate",
+            note: "Best on ugly scans and faint faxes. About 2-3 cents per press."},
+        {id: "claude-sonnet-5", label: "Sonnet 5 - balanced",
+            note: "Near-Opus accuracy at about a third of the cost. About 1 cent per press."},
+        {id: "claude-haiku-4-5", label: "Haiku 4.5 - cheapest",
+            note: "Fastest and cheapest; weakest on messy scans. About half a cent per press."}
+    ]
+}
+
+ModelNoteFor(id) {
+    for m in ModelOptions() {
+        if (m.id = id)
+            return m.note
+    }
+    return ""
+}
+
 Toast(msg, ms := 2600) {
     ToolTip(msg)
     SetTimer(() => ToolTip(), -ms)
@@ -426,6 +445,7 @@ global BTNGUI := ""
 global PROGGUI := ""
 global PROGTEXT := ""
 global PROGBAR := ""
+global SETGUI := ""
 
 ; Small floating status window - text + a stepping progress bar, shown
 ; near the mouse. PROG_Show creates the Gui once and reuses it on later runs.
@@ -525,6 +545,7 @@ MakeButton() {
     BTNGUI.SetFont("s10 bold")
     b := BTNGUI.AddButton("w110 h34", "Insert header")
     b.OnEvent("Click", RunInsert)
+    BTNGUI.OnEvent("ContextMenu", (*) => ShowSettingsGui())
     ; Drag anywhere on the window edge (the margin around the button).
     OnMessage(0x201, HDR_Drag)      ; WM_LBUTTONDOWN
     OnMessage(0x232, HDR_DragEnd)   ; WM_EXITSIZEMOVE
@@ -549,6 +570,147 @@ HDR_DragEnd(wParam, lParam, msg, hwnd) {
     IniWrite(y, CFG.path, "Settings", "ButtonY")
 }
 
+ShowSettingsGui() {
+    global CFG, SETGUI, BTNGUI
+    if (SETGUI != "") {
+        SETGUI.Show()
+        return
+    }
+
+    mo := ModelOptions()
+
+    SETGUI := Gui("+ToolWindow", "PDF Header Tool - Settings")
+    SETGUI.MarginX := 12
+    SETGUI.MarginY := 10
+    SETGUI.SetFont("s9")
+
+    SETGUI.AddText("", "Hotkey:")
+    try
+        hkCtl := SETGUI.AddHotkey("w150 x+10 yp-2", CFG.hotkey)
+    catch
+        hkCtl := SETGUI.AddHotkey("w150 x+10 yp-2")
+    noHotkeyChk := SETGUI.AddCheckbox("x+10 yp+2" (CFG.hotkey = "" ? " Checked" : ""), "No hotkey")
+    hkCtl.Enabled := (CFG.hotkey != "")
+    noHotkeyChk.OnEvent("Click", SETGUI_ToggleHotkey)
+    SETGUI_ToggleHotkey(*) {
+        hkCtl.Enabled := !noHotkeyChk.Value
+    }
+
+    SETGUI.AddText("xm y+12", "Model:")
+    labels := []
+    for m in mo
+        labels.Push(m.label)
+    modelIdx := 0
+    for i, m in mo {
+        if (m.id = CFG.model) {
+            modelIdx := i
+            break
+        }
+    }
+    if (modelIdx = 0) {
+        labels.Push("Custom: " CFG.model)
+        modelIdx := labels.Length
+    }
+    modelDDL := SETGUI.AddDropDownList("w300 x+10 yp-2 Choose" modelIdx, labels)
+    modelNoteTxt := SETGUI.AddText("xm y+6 w300 r3",
+        (modelIdx <= mo.Length) ? ModelNoteFor(mo[modelIdx].id) : "Custom model string from settings file.")
+    modelDDL.OnEvent("Change", SETGUI_ModelChanged)
+    SETGUI_ModelChanged(*) {
+        idx := modelDDL.Value
+        modelNoteTxt.Text := (idx >= 1 && idx <= mo.Length)
+            ? ModelNoteFor(mo[idx].id) : "Custom model string from settings file."
+    }
+
+    SETGUI.AddText("xm y+12", "Font:")
+    fonts := ["Times New Roman", "Calibri", "Cambria", "Georgia", "Arial", "Book Antiqua"]
+    fontIdx := 0
+    for i, f in fonts {
+        if (f = CFG.headerFont) {
+            fontIdx := i
+            break
+        }
+    }
+    if (fontIdx = 0) {
+        fonts.Push(CFG.headerFont)
+        fontIdx := fonts.Length
+    }
+    fontCombo := SETGUI.AddComboBox("w200 x+10 yp-2 Choose" fontIdx, fonts)
+    SETGUI.AddText("x+10 yp+4", "Size:")
+    sizeEdit := SETGUI.AddEdit("w60 x+6 yp-4 Number", CFG.headerSize)
+    SETGUI.AddUpDown("Range6-72", CFG.headerSize)
+
+    showBtnChk := SETGUI.AddCheckbox("xm y+14" (CFG.showButton ? " Checked" : ""), "Show floating button")
+
+    SETGUI.AddText("xm y+12", "API key:")
+    apiKeyEdit := SETGUI.AddEdit("w300 x+10 yp-2 Password", CFG.apiKey)
+
+    saveBtn := SETGUI.AddButton("xm y+16 w90 Default", "Save")
+    cancelBtn := SETGUI.AddButton("x+10 yp w90", "Cancel")
+    saveBtn.OnEvent("Click", SETGUI_Save)
+    SETGUI_Save(*) {
+        global CFG, SETGUI, BTNGUI
+        newHotkey := ""
+        if !noHotkeyChk.Value {
+            hkVal := hkCtl.Value
+            newHotkey := (hkVal != "") ? hkVal : CFG.hotkey
+        }
+        oldHotkey := CFG.hotkey
+        if (oldHotkey != "")
+            try Hotkey(oldHotkey, "Off")
+        if (newHotkey != "") {
+            try {
+                Hotkey(newHotkey, RunInsert, "On")
+            } catch {
+                if (oldHotkey != "")
+                    try Hotkey(oldHotkey, RunInsert, "On")
+                MsgBox("'" newHotkey "' is not a usable hotkey.", "PDF Header Tool", "Icon!")
+                return
+            }
+        }
+
+        selIdx := modelDDL.Value
+        newModel := (selIdx >= 1 && selIdx <= mo.Length) ? mo[selIdx].id : CFG.model
+        newFont := fontCombo.Text
+        newSize := HDR_ValidSize(sizeEdit.Text)
+        newApiKey := apiKeyEdit.Text
+        newShowButton := showBtnChk.Value ? true : false
+
+        if newShowButton {
+            if (BTNGUI = "")
+                MakeButton()
+            else
+                BTNGUI.Show("NoActivate")
+        } else if (BTNGUI != "")
+            BTNGUI.Hide()
+
+        IniWrite(newHotkey, CFG.path, "Settings", "Hotkey")
+        IniWrite(newModel, CFG.path, "Settings", "Model")
+        IniWrite(newFont, CFG.path, "Settings", "HeaderFont")
+        IniWrite(newSize, CFG.path, "Settings", "HeaderSize")
+        IniWrite(newShowButton ? "1" : "0", CFG.path, "Settings", "ShowButton")
+        IniWrite(newApiKey, CFG.path, "Settings", "ApiKey")
+
+        CFG.hotkey := newHotkey
+        CFG.model := newModel
+        CFG.headerFont := newFont
+        CFG.headerSize := newSize
+        CFG.showButton := newShowButton
+        CFG.apiKey := newApiKey
+
+        SETGUI.Destroy()
+        SETGUI := ""
+    }
+    cancelBtn.OnEvent("Click", SETGUI_Cancel)
+    SETGUI.OnEvent("Close", SETGUI_Cancel)
+    SETGUI_Cancel(*) {
+        global SETGUI
+        SETGUI.Destroy()
+        SETGUI := ""
+    }
+
+    SETGUI.Show()
+}
+
 Main() {
     global CFG
     CFG := LoadSettings()
@@ -568,9 +730,10 @@ Main() {
     }
     if CFG.showButton
         MakeButton()
-    A_TrayMenu.Insert("1&", "Insert header now", RunInsert)
-    A_TrayMenu.Insert("2&", "Open settings", (*) => Run('notepad.exe "' CFG.path '"'))
-    A_TrayMenu.Insert("3&", "Reload", (*) => Reload())
+    A_TrayMenu.Insert("1&", "Settings", (*) => ShowSettingsGui())
+    A_TrayMenu.Insert("2&", "Insert header now", RunInsert)
+    A_TrayMenu.Insert("3&", "Open settings file", (*) => Run('notepad.exe "' CFG.path '"'))
+    A_TrayMenu.Insert("4&", "Reload", (*) => Reload())
     Persistent(true)
 }
 

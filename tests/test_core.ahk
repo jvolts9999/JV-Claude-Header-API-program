@@ -165,5 +165,12 @@ FileDelete(sPath9)
 AssertEq(HDR_ValidSize(14), 14, "validsize passthrough")
 AssertEq(HDR_ValidSize(""), 20, "validsize empty")
 
+; ---- Task 11: model options ----
+mo := ModelOptions()
+AssertEq(mo.Length, 3, "model options count")
+AssertEq(mo[1].id, "claude-opus-5", "model options first id")
+AssertTrue(InStr(ModelNoteFor("claude-haiku-4-5"), "cheapest") > 0, "haiku note text")
+AssertEq(ModelNoteFor("claude-nonexistent"), "", "unknown model empty note")
+
 FileAppend((TestFails ? "FAILED " TestFails "/" TestCount : "PASSED " TestCount) " tests`n", "*")
 ExitApp(TestFails)

@@ -10,11 +10,21 @@ Double-click `PDFHeaderTool.ahk` (requires AutoHotkey v2). First run creates
 `%APPDATA%\PDFHeaderTool\settings.ini` and opens it - paste your Claude API
 key after `ApiKey=` and save.
 
-## Settings (`%APPDATA%\PDFHeaderTool\settings.ini`)
+## Settings
+
+Open the Settings window from the tray icon (**Settings**, the first item) or
+by right-clicking the floating button. It covers the hotkey (or turning it
+off), the model, the header font and size, showing or hiding the floating
+button, and the API key. Save applies changes right away - no Reload needed.
+
+Settings are stored in `%APPDATA%\PDFHeaderTool\settings.ini`, which stays
+hand-editable if you prefer:
 
 - `ApiKey` - your Claude API key (never stored in this repo)
 - `Hotkey` - default `F8`; blank disables the hotkey
 - `Model` - default `claude-opus-5`; cheaper alternatives: `claude-sonnet-5` (about 1 cent/press) or `claude-haiku-4-5` (about half a cent/press). Change the line, then Reload from the tray menu.
+- `HeaderFont` - default `Times New Roman`
+- `HeaderSize` - default `20`
 - `ShowButton` - `1` shows the floating button, `0` hides it
 - `ButtonX`/`ButtonY` - remembered button position (set automatically)
 
