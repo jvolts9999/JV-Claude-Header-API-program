@@ -1543,3 +1543,82 @@ recounts (101 + 14 = 115 expected), GREEN must match, exit 0.
 Summarize button appears above Insert header; toggle hides it; select PDF text -> click ->
 progress strip -> 2-4 sentence summary typed at the Word cursor; no-selection click toasts;
 clipboard contents restored afterward. Then merge + push.
+
+### Task 17 (John features 2026-08-22, round 2): summary font + page queue
+
+John's rulings: (1) summarized text gets its own configurable font name + size in Settings
+(defaults Times New Roman / 12; header row stays as-is). (2) A third stacked button
+`Queue Summary` ABOVE `Summarize text`: each click queues the CURRENT PDF page and the
+button label shows the count (`Queue Summary (3)`); clicking `Summarize text` with a
+non-empty queue summarizes ALL queued pages as ONE combined summary (multi-page notes),
+ignoring any text selection; queue auto-clears after a SUCCESSFUL summary (kept on failure
+for retry); right-clicking the Queue button clears it manually. Queue is session-only,
+part of the Summarize toggle (hidden with it).
+
+**Files:**
+- Modify: `PDFHeaderTool.ahk`
+- Modify: `tests\test_core.ahk`
+- Modify: `README.md` (summary-font row + queue paragraph)
+
+**Changes:**
+
+1. `HDR_ValidSize(v, fallback := 20)` — parameterized fallback; existing callers/tests
+   unchanged (default keeps 20).
+2. Ini/settings: `SummaryFont=Times New Roman`, `SummarySize=12` in first-run template;
+   LoadSettings fields `summaryFont` (default "Times New Roman") and `summarySize`
+   (`HDR_ValidSize(..., 12)`).
+3. `InsertSummary(text, fontName, fontSize)` -> `{ok:true}` / `{ok:false, err}`: replaces
+   the raw `TypeText` call. Word COM, file convention: try/catch returning the friendly
+   err. Insert `text` at the cursor via range insert (capture `word.Selection.Range.Start`,
+   `doc.Range(at, at).InsertBefore(text)`), then on `[at, at+StrLen(text)]` apply
+   `Font.Name`/`Font.Size` when given and `Font.Color := 0`. The cursor's paragraph style
+   is untouched. `SummarizeAndInsert` calls this with `CFG.summaryFont, CFG.summarySize`.
+4. Queue state: `global SUMQUEUE := []` (array of `{pdfPath, pageNum}`); temp files copied
+   from GrabCurrentPage's fixed tmp to unique names
+   (`A_Temp "\PDFHeaderTool_q" A_TickCount "_" idx ".pdf"`). Cap 20 pages (toast "Queue is
+   full (20 pages)." on further clicks).
+5. Queue button + handlers: `MakeButton()` stacks (top to bottom) `Queue Summary` /
+   `Summarize text` / `Insert header`, all w110 h34, only when `CFG.showSummarize` (else
+   single Insert-header button as now). Click Queue: BUSY guard; `GrabCurrentPage()` (err
+   -> toast); copy tmp to unique queue file + delete tmp; push; update label to
+   `Queue Summary (N)`; toast `Page N queued (count of M)`. Right-click Queue button:
+   clear — delete queue temp files (try), empty array, label reset, toast "Queue cleared."
+   Implement via the existing `ContextMenu` OnEvent: its GuiCtrlObj parameter identifies
+   the control — Queue button -> clear; anywhere else -> Settings window as now.
+6. `RunSummarizeCore`: FIRST check — `SUMQUEUE.Length > 0` -> skip clipboard capture
+   entirely (clipboard untouched in this branch): Word pre-flight, then base64 each queued
+   file IN ORDER, `BuildQueueSummaryRequestBody(b64List, model)`, progress
+   `"Summarizing " N " queued pages..."`, same CallClaude/ExtractText/InsertSummary tail;
+   ON SUCCESS ONLY: delete queue files, empty array, reset button label. Empty queue ->
+   existing selection/page logic unchanged.
+7. `BuildQueueSummaryRequestBody(b64List, model)`: document blocks in array order (each
+   `{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":...}}`),
+   then one text block; `max_tokens` 16000; `ModelWantsFallbacks`-gated fallbacks; NO
+   output_config. Static prompt: "These pages are one multi-page note from a medical
+   record, in order. Summarize the note for a medical-legal chronology. Write 2-4
+   sentences of plain prose covering what happened, the key findings, and the plan. No
+   preamble, no headings, no bullet points - just the sentences."
+
+8. Summarize hotkey (John, added mid-round): ini `SummarizeHotkey=` (default EMPTY = no
+   hotkey); LoadSettings field `summarizeHotkey`. `Main()` registers it -> `RunSummarize`
+   when non-empty, in try/catch with the same invalid-hotkey MsgBox pattern as the header
+   hotkey. Settings GUI gains a second hotkey row directly under the first — capture
+   control + unlabeled "No hotkey" checkbox + white labels, EXACTLY mirroring the header
+   row's behavior: no-hotkey checked -> ""; non-empty capture -> new value; blank capture
+   -> keep stored value. Save applies live (unregister old, register new; invalid ->
+   MsgBox, keep old, window stays open, nothing saved). NEW guard: if the summarize hotkey
+   equals the header hotkey (both non-empty, case-insensitive), MsgBox "Both functions
+   cannot share one hotkey." and abort the save with the window open.
+
+**TDD (pure parts):** RED then GREEN. New assertions: `HDR_ValidSize` fallback param
+(default still 20, explicit 12) (2); LoadSettings `summaryFont`/`summarySize` defaults +
+`SummarySize=abc` -> 12 clamp (3); LoadSettings `summarizeHotkey` default "" + override
+read (2); `BuildQueueSummaryRequestBody` with a 3-item fake b64
+list: 4 content blocks total, first three are documents in order with b64 passthrough,
+last is text mentioning "one multi-page note" and "2-4 sentences", no `output_config`,
+fallbacks present for opus / absent for haiku (~7). Existing tests unmodified. Implementer
+recounts (125 + ~12), states expected total, GREEN must match, exit 0.
+
+**Checkpoint 8 (John):** summary font row in Settings; a queued 2-3 page note summarizes
+as one entry in TNR 12; queue count shows on the button; right-click clears; failure keeps
+the queue; single-page and selection modes unchanged. Then merge + push.
