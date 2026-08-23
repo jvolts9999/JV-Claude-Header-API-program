@@ -7,6 +7,10 @@
 ; 2026-08-21-pdf-header-tool-design.md
 ; ======================================================================
 
+; Bump on every released iteration. Shown in the tray tooltip and the
+; Settings window title.
+global HDR_VERSION := "2.1"
+
 ; --- JSON --------------------------------------------------------------
 ; Minimal strict JSON parser. null parses to "" ON PURPOSE: every field
 ; this tool reads treats null and empty as the same thing (placeholder).
@@ -435,7 +439,7 @@ HDR_TrackUsage(responseText) {
     SESSION_CALLS++
     u := ExtractUsage(responseText)
     cents := EstimateCents(CFG.model, u.inTok, u.outTok)
-    tip := "PDF Header Tool - " SESSION_CALLS " calls"
+    tip := "PDF Header Tool v" HDR_VERSION " - " SESSION_CALLS " calls"
     if (cents >= 0) {
         SESSION_CENTS += cents
         tip .= ", ~" Format("{:.1f}", SESSION_CENTS) " cents this session"
@@ -1365,7 +1369,7 @@ ShowSettingsGui() {
 
     mo := ModelOptions()
 
-    SETGUI := Gui("+ToolWindow", "PDF Header Tool - Settings")
+    SETGUI := Gui("+ToolWindow", "PDF Header Tool v" HDR_VERSION " - Settings")
     SETGUI.BackColor := "0x2B2B2B"
     SETGUI.MarginX := 12
     SETGUI.MarginY := 10
@@ -1863,6 +1867,7 @@ ShowApiKeyDialog(owner, currentKey) {
 Main() {
     global CFG
     CFG := LoadSettings()
+    A_IconTip := "PDF Header Tool v" HDR_VERSION
     HDR_FixSessionVolume()
     if CFG.firstRun {
         MsgBox("Welcome. A settings file was created at:`n`n" CFG.path
