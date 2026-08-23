@@ -64,11 +64,15 @@ anything about a Wispr sound fails, it falls back to the two-tone beep
 automatically - you always get a sound, never an error dialog. Turn sound off
 entirely in Settings (**Completion beep**).
 
-If the Wispr sounds are silent but the two-tone beep works, Windows is likely
-routing AutoHotkey's audio to a device you aren't listening to (a per-app
-override in Settings > System > Sound > Volume mixer, remembered per exe
-forever; beeps bypass per-app routing, which is why they still work). Set
-AutoHotkey's Output back to Default there - or delete its entries under
+If the Wispr sounds are silent but the two-tone beep works, Windows' per-app
+audio memory for AutoHotkey64.exe is the usual culprit (beeps go through the
+system-sounds session, so they bypass all of it - that's why they still work).
+Two forms, both remembered per exe forever in Settings > System > Sound >
+Volume mixer: the app's VOLUME slider at zero (WAVs render "successfully" at
+silence - the tool now raises its own zeroed session back to 100% at startup,
+so a reload fixes this one automatically), or an OUTPUT device override
+pointing somewhere you aren't listening. For the latter, set AutoHotkey's
+Output back to Default there - or delete its entries under
 `HKCU\Software\Microsoft\Internet Explorer\LowRegistry\Audio\PolicyConfig\PropertyStore`
 (the values that name `AutoHotkey64.exe`) - then reload the tool. The tray
 icon's tooltip tracks calls made and an estimated cost for the session, e.g.
