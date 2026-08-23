@@ -738,33 +738,33 @@ HDR_EnsureSounds(scheme) {
     return out
 }
 
-; Windows keeps a per-app Volume-mixer level for AutoHotkey64.exe, persisted
-; per exe+device. If that slider was ever dragged to zero, every WAV this
-; tool plays renders "successfully" at silence while the two-tone beeps stay
-; audible (they go through the system-sounds session instead). At startup,
-; raise this process's session back to full volume when it is near zero -
-; a deliberate partial mixer setting is left alone. Best-effort: any COM
-; failure is swallowed and the tool runs as before.
+; Windows keeps a per-app Volume-mixer level AND mute flag for
+; AutoHotkey64.exe, persisted per exe+device. Either one (slider at zero, or
+; the mute icon) makes every WAV this tool plays render "successfully" at
+; silence while the two-tone beeps stay audible (they go through the
+; system-sounds session instead). Restore this process's session on the
+; current default device: raise the volume when it is near zero (a deliberate
+; partial mixer setting is left alone) and clear mute. Runs at startup and
+; again before each WAV play, so a default-device change mid-session is
+; covered too. Best-effort: any COM failure is swallowed. The ComValue(13,0)
+; out-params auto-release their interfaces on scope exit.
 HDR_FixSessionVolume() {
-    dev := 0, mgr := 0, sav := 0
     try {
         devEnum := ComObject("{BCDE0395-E52F-467C-8E3D-C4579291692E}", "{A95664D2-9614-4F35-A746-DE8DB63617E6}")
-        ComCall(4, devEnum, "int", 0, "int", 0, "ptr*", &dev)            ; GetDefaultAudioEndpoint(eRender, eConsole)
+        ComCall(4, devEnum, "int", 0, "int", 0, "ptr*", dev := ComValue(13, 0))           ; GetDefaultAudioEndpoint(eRender, eConsole)
         iid := Buffer(16)
         DllCall("ole32\IIDFromString", "wstr", "{BFA971F1-4D5E-40BB-935E-967039BFBEE4}", "ptr", iid, "hresult")
-        ComCall(3, dev, "ptr", iid, "uint", 23, "ptr", 0, "ptr*", &mgr)  ; Activate(IAudioSessionManager, CLSCTX_ALL)
-        ComCall(4, mgr, "ptr", 0, "int", 0, "ptr*", &sav)                ; GetSimpleAudioVolume (this process's session)
+        ComCall(3, dev, "ptr", iid, "uint", 23, "ptr", 0, "ptr*", mgr := ComValue(13, 0)) ; Activate(IAudioSessionManager, CLSCTX_ALL)
+        ComCall(4, mgr, "ptr", 0, "int", 0, "ptr*", sav := ComValue(13, 0))               ; GetSimpleAudioVolume (this process's session)
         vol := 0.0
-        ComCall(4, sav, "float*", &vol)                                  ; GetMasterVolume
+        ComCall(4, sav, "float*", &vol)                                                   ; GetMasterVolume
         if (vol < 0.05)
-            ComCall(3, sav, "float", 1.0, "ptr", 0)                      ; SetMasterVolume(1.0)
+            ComCall(3, sav, "float", 1.0, "ptr", 0)                                       ; SetMasterVolume(1.0)
+        muted := 0
+        ComCall(6, sav, "int*", &muted)                                                   ; GetMute
+        if muted
+            ComCall(5, sav, "int", 0, "ptr", 0)                                           ; SetMute(false)
     }
-    if sav
-        ObjRelease(sav)
-    if mgr
-        ObjRelease(mgr)
-    if dev
-        ObjRelease(dev)
 }
 
 ; Shared by HDR_Chime and the Settings Test button: tries to play scheme's
@@ -780,6 +780,7 @@ HDR_FixSessionVolume() {
 HDR_PlaySoundFile(scheme, kind) {
     if (scheme = "beep")
         return false
+    HDR_FixSessionVolume()
     files := HDR_EnsureSounds(scheme)
     if !files.Has(kind)
         return false

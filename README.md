@@ -68,13 +68,16 @@ If the Wispr sounds are silent but the two-tone beep works, Windows' per-app
 audio memory for AutoHotkey64.exe is the usual culprit (beeps go through the
 system-sounds session, so they bypass all of it - that's why they still work).
 Two forms, both remembered per exe forever in Settings > System > Sound >
-Volume mixer: the app's VOLUME slider at zero (WAVs render "successfully" at
-silence - the tool now raises its own zeroed session back to 100% at startup,
-so a reload fixes this one automatically), or an OUTPUT device override
-pointing somewhere you aren't listening. For the latter, set AutoHotkey's
-Output back to Default there - or delete its entries under
+Volume mixer: the app's VOLUME slider at zero or its mute button on (WAVs
+render "successfully" at silence - the tool now restores its own zeroed or
+muted session at startup and again before each sound, so this case fixes
+itself), or an OUTPUT device override pointing somewhere you aren't
+listening. For the latter, set AutoHotkey's Output back to Default there -
+or delete its entries under
 `HKCU\Software\Microsoft\Internet Explorer\LowRegistry\Audio\PolicyConfig\PropertyStore`
-(the values that name `AutoHotkey64.exe`) - then reload the tool. The tray
+(the values that name `AutoHotkey64.exe`) - then reload the tool.
+
+The tray
 icon's tooltip tracks calls made and an estimated cost for the session, e.g.
 "PDF Header Tool - 12 calls, ~8.4 cents this session" (the cost is a rough
 estimate from Anthropic's published per-token pricing, not a billing figure,
