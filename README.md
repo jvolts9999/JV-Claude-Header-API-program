@@ -62,7 +62,15 @@ original two-tone beep (ascending notes on success, descending on failure); a
 without saving, so you can choose by ear. If Wispr Flow isn't installed, or
 anything about a Wispr sound fails, it falls back to the two-tone beep
 automatically - you always get a sound, never an error dialog. Turn sound off
-entirely in Settings (**Completion beep**). The tray
+entirely in Settings (**Completion beep**).
+
+If the Wispr sounds are silent but the two-tone beep works, Windows is likely
+routing AutoHotkey's audio to a device you aren't listening to (a per-app
+override in Settings > System > Sound > Volume mixer, remembered per exe
+forever; beeps bypass per-app routing, which is why they still work). Set
+AutoHotkey's Output back to Default there - or delete its entries under
+`HKCU\Software\Microsoft\Internet Explorer\LowRegistry\Audio\PolicyConfig\PropertyStore`
+(the values that name `AutoHotkey64.exe`) - then reload the tool. The tray
 icon's tooltip tracks calls made and an estimated cost for the session, e.g.
 "PDF Header Tool - 12 calls, ~8.4 cents this session" (the cost is a rough
 estimate from Anthropic's published per-token pricing, not a billing figure,
