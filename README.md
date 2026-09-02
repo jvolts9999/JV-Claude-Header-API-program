@@ -52,8 +52,9 @@ current PDF page - its label shows the count, e.g. `Queue (3)`. With pages queue
 (a multi-page note), ignoring any text selection. With pages queued, pressing
 **Insert header** instead reads the FIRST queued page and inserts its header
 - the page stays in the queue (it's still needed for the summary run). The
-queue holds up to 20 pages and clears automatically after a successful
-summary; a failed attempt keeps the queue so you can retry. Right-click the
+queue holds up to 20 pages, all from the same PDF (a page from another
+document is refused until you clear the queue), and clears automatically
+after a successful summary; a failed attempt keeps the queue so you can retry. Right-click the
 Queue chip to clear it manually. The queue is session-only (not saved
 between runs).
 

@@ -582,7 +582,7 @@ CallClaude(body, apiKey, timeoutSec := 60, onTick := "") {
             return r
         retries++
         delayMs := HDR_RetryDelayMs(retries, r.retryAfter)
-        Toast("Claude is busy (HTTP " r.status ") - retrying in " (delayMs // 1000) " s (" retries "/3)...")
+        Toast("Claude is busy (HTTP " r.status ") - retrying in " (delayMs // 1000) " s (" retries "/3)...", delayMs)
         Sleep(delayMs)
     }
 }
@@ -1102,8 +1102,8 @@ PROG_Show(text, chip := "header") {
 }
 
 PROG_Set(text, pct) {
-    global PROGGUI, PROGTEXT, PROGBAR, TBCHIPS, TBBAR, TBACTIVE
-    if (TBACTIVE != "" && TBCHIPS.Has(TBACTIVE)) {
+    global PROGGUI, PROGTEXT, PROGBAR, BTNGUI, TBCHIPS, TBBAR, TBACTIVE
+    if (TBACTIVE != "" && BTNGUI != "" && TBCHIPS.Has(TBACTIVE)) {
         TBCHIPS[TBACTIVE].label.Text := TB_Word(text) " " pct "%"
         TBBAR.Value := pct
         return
@@ -1115,9 +1115,9 @@ PROG_Set(text, pct) {
 }
 
 PROG_Hide() {
-    global PROGGUI, TBCHIPS, TBBAR, TBACTIVE
+    global PROGGUI, BTNGUI, TBCHIPS, TBBAR, TBACTIVE
     if (TBACTIVE != "") {
-        if TBCHIPS.Has(TBACTIVE) {
+        if (BTNGUI != "" && TBCHIPS.Has(TBACTIVE)) {
             c := TBCHIPS[TBACTIVE]
             c.icon.Text := c.glyph
             c.label.Text := c.text
@@ -1247,14 +1247,19 @@ RunCompareModels(*) {
     if BUSY
         return
     BUSY := true
+    result := ""
     try
-        RunCompareModelsCore()
+        result := RunCompareModelsCore()
     catch as e
         Toast("Error: " e.Message)
     finally {
         BUSY := false
         PROG_Hide()
     }
+    ; Shown only after BUSY is released: the report can sit open while the
+    ; user keeps working, without dead-keying the hotkeys behind it.
+    if IsObject(result)
+        MsgBox(result.report, "PDF Header Tool - model comparison (page " result.pageNum ")", "Iconi")
 }
 
 RunCompareModelsCore() {
@@ -1264,7 +1269,7 @@ RunCompareModelsCore() {
         if (CFG.apiKey = "") {
             Toast("No API key yet - paste it into Settings and save.")
             ShowSettingsGui()
-            return
+            return ""
         }
     }
     PROG_Show("Reading page...")
@@ -1272,7 +1277,7 @@ RunCompareModelsCore() {
     if !g.ok {
         Toast(g.err)
         HDR_Chime(false)
-        return
+        return ""
     }
     b64 := FileToBase64(g.pdfPath)
     try FileDelete(g.pdfPath)
@@ -1306,7 +1311,7 @@ RunCompareModelsCore() {
         report .= (report = "" ? "" : "`n`n") line1 "`n" line2
     }
     HDR_Chime(anyOk)
-    MsgBox(report, "PDF Header Tool - model comparison (page " g.pageNum ")", "Iconi")
+    return {report: report, pageNum: g.pageNum}
 }
 
 RunSummarize(*) {
@@ -1488,6 +1493,13 @@ RunQueueCore() {
         Toast(g.err)
         return
     }
+    ; One note = one PDF: a page from another document would make the queue's
+    ; combined summary and its page-span citation quietly wrong.
+    if (SUMQUEUE.Length > 0 && SUMQUEUE[1].docName != g.docName) {
+        Toast("That page is from a different PDF than the queued pages - clear the queue first.")
+        try FileDelete(g.pdfPath)
+        return
+    }
     idx := SUMQUEUE.Length + 1
     qPath := A_Temp "\PDFHeaderTool_q" A_TickCount "_" idx ".pdf"
     try
@@ -1498,7 +1510,7 @@ RunQueueCore() {
         return
     }
     try FileDelete(g.pdfPath)
-    SUMQUEUE.Push({pdfPath: qPath, pageNum: g.pageNum, pageLabel: g.pageLabel})
+    SUMQUEUE.Push({pdfPath: qPath, pageNum: g.pageNum, pageLabel: g.pageLabel, docName: g.docName})
     SUMQ_UpdateLabel()
     Toast("Page " g.pageNum " queued (count of " SUMQUEUE.Length ").")
 }
@@ -1553,6 +1565,23 @@ MakeButton() {
         BTNGUI.Show("x" CFG.btnX " y" CFG.btnY " NoActivate")
     else
         BTNGUI.Show("NoActivate")
+}
+
+; Tears the toolbar down completely. Every chip reference is dropped along
+; with the window so a run still in flight (progress lives in TBACTIVE /
+; TBBAR) can't touch destroyed controls - it just goes quiet.
+TB_Destroy() {
+    global BTNGUI, QBTN, TBCHIPS, TBGRIP, TBBAR, TBHOVER, TBACTIVE
+    SetTimer(TB_HoverTick, 0)
+    ToolTip(, , , 2)
+    BTNGUI.Destroy()
+    BTNGUI := ""
+    QBTN := ""
+    TBCHIPS := Map()
+    TBGRIP := ""
+    TBBAR := ""
+    TBHOVER := ""
+    TBACTIVE := ""
 }
 
 TB_AddChip(key, glyph, text, labelW, action, tip) {
@@ -2063,13 +2092,8 @@ ShowSettingsGui() {
         ; QBTN is reset alongside BTNGUI so it never dangles on a destroyed
         ; control if the button stays hidden (MakeButton would otherwise be
         ; the only thing that clears it, and it's skipped in that case).
-        if (BTNGUI != "") {
-            SetTimer(TB_HoverTick, 0)
-            ToolTip(, , , 2)
-            BTNGUI.Destroy()
-            BTNGUI := ""
-            QBTN := ""
-        }
+        if (BTNGUI != "")
+            TB_Destroy()
         if newShowButton
             MakeButton()
 
