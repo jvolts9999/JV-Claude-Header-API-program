@@ -520,5 +520,35 @@ AssertTrue(HDR_VersionCompare("1.6.9", "1.6.606") < 0, "versioncompare 9 loses t
 AssertTrue(HDR_VersionCompare("1.7.0", "1.6.999") > 0, "versioncompare higher minor beats lower-minor larger patch")
 AssertEq(HDR_VersionCompare("1.6.606", "1.6.606"), 0, "versioncompare equal versions")
 
+; ---- Automatic retry on transient API errors (CallClaude) ----
+
+; HDR_ShouldRetry: transient/overloaded statuses retry, everything else does not
+AssertTrue(HDR_ShouldRetry(429), "shouldretry 429 true")
+AssertTrue(HDR_ShouldRetry(500), "shouldretry 500 true")
+AssertTrue(HDR_ShouldRetry(502), "shouldretry 502 true")
+AssertTrue(HDR_ShouldRetry(503), "shouldretry 503 true")
+AssertTrue(HDR_ShouldRetry(529), "shouldretry 529 true")
+AssertEq(HDR_ShouldRetry(0) ? 1 : 0, 0, "shouldretry 0 false (network failure, not an HTTP status)")
+AssertEq(HDR_ShouldRetry(200) ? 1 : 0, 0, "shouldretry 200 false")
+AssertEq(HDR_ShouldRetry(400) ? 1 : 0, 0, "shouldretry 400 false")
+AssertEq(HDR_ShouldRetry(401) ? 1 : 0, 0, "shouldretry 401 false")
+AssertEq(HDR_ShouldRetry(404) ? 1 : 0, 0, "shouldretry 404 false")
+AssertEq(HDR_ShouldRetry(413) ? 1 : 0, 0, "shouldretry 413 false")
+
+; HDR_RetryDelayMs: schedule steps 2s/5s/10s, attempt 3+ stays at 10s
+AssertEq(HDR_RetryDelayMs(1, ""), 2000, "retrydelay attempt 1 is 2000ms")
+AssertEq(HDR_RetryDelayMs(2, ""), 5000, "retrydelay attempt 2 is 5000ms")
+AssertEq(HDR_RetryDelayMs(3, ""), 10000, "retrydelay attempt 3 is 10000ms")
+AssertEq(HDR_RetryDelayMs(4, ""), 10000, "retrydelay attempt 4+ stays 10000ms")
+
+; Retry-After header: positive numeric hint overrides the schedule, capped at 10s
+AssertEq(HDR_RetryDelayMs(1, 3), 3000, "retrydelay retry-after overrides schedule")
+AssertEq(HDR_RetryDelayMs(1, 30), 10000, "retrydelay retry-after capped at 10000ms")
+
+; Non-numeric/zero/negative retry-after falls back to the schedule
+AssertEq(HDR_RetryDelayMs(1, "abc"), 2000, "retrydelay non-numeric retry-after falls back to schedule")
+AssertEq(HDR_RetryDelayMs(1, 0), 2000, "retrydelay zero retry-after falls back to schedule")
+AssertEq(HDR_RetryDelayMs(1, -5), 2000, "retrydelay negative retry-after falls back to schedule")
+
 FileAppend((TestFails ? "FAILED " TestFails "/" TestCount : "PASSED " TestCount) " tests`n", "*")
 ExitApp(TestFails)

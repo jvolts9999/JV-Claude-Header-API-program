@@ -466,35 +466,76 @@ FileToBase64(path) {
     return StrGet(out, "UTF-16")
 }
 
+; Pure: which HTTP statuses from Claude are worth an automatic retry (server
+; overloaded/rate-limited/transient). Auth, bad-request, not-found, and
+; payload-too-large are permanent - retrying just wastes the wait.
+HDR_ShouldRetry(status) {
+    return status = 429 || status = 500 || status = 502 || status = 503 || status = 529
+}
+
+; Pure: backoff schedule for retry attempt N (1-based) - 2s, 5s, then 10s from
+; attempt 3 on. A positive numeric retryAfterSec (from the server's
+; Retry-After header) overrides the schedule, capped at 10s so a large hint
+; can't stall the UI; blank/non-numeric/zero/negative falls back to the
+; schedule.
+HDR_RetryDelayMs(attempt, retryAfterSec) {
+    if IsNumber(retryAfterSec) && retryAfterSec > 0
+        return Min(retryAfterSec * 1000, 10000)
+    if (attempt = 1)
+        return 2000
+    if (attempt = 2)
+        return 5000
+    return 10000
+}
+
+; Retries transient/overloaded responses (HDR_ShouldRetry) up to 3 times with
+; a backoff wait (HDR_RetryDelayMs), each attempt a fresh request via the
+; inner Attempt(). Network failures/timeouts (status 0) are never retried.
 CallClaude(body, apiKey, timeoutSec := 60, onTick := "") {
-    req := ComObject("WinHttp.WinHttpRequest.5.1")
-    try {
-        req.Open("POST", "https://api.anthropic.com/v1/messages", true)
-        req.SetTimeouts(15000, 15000, timeoutSec * 1000, timeoutSec * 1000)
-        req.SetRequestHeader("Content-Type", "application/json")
-        req.SetRequestHeader("x-api-key", apiKey)
-        req.SetRequestHeader("anthropic-version", "2023-06-01")
-        if InStr(body, '"fallbacks"')
-            req.SetRequestHeader("anthropic-beta", "server-side-fallback-2026-07-01")
-        req.Send(body)
-    } catch as e {
-        return {status: 0, text: "", err: "Could not reach the API: " e.Message}
-    }
-    deadline := A_TickCount + timeoutSec * 1000
-    loop {
-        done := false
+    Attempt() {
+        req := ComObject("WinHttp.WinHttpRequest.5.1")
+        try {
+            req.Open("POST", "https://api.anthropic.com/v1/messages", true)
+            req.SetTimeouts(15000, 15000, timeoutSec * 1000, timeoutSec * 1000)
+            req.SetRequestHeader("Content-Type", "application/json")
+            req.SetRequestHeader("x-api-key", apiKey)
+            req.SetRequestHeader("anthropic-version", "2023-06-01")
+            if InStr(body, '"fallbacks"')
+                req.SetRequestHeader("anthropic-beta", "server-side-fallback-2026-07-01")
+            req.Send(body)
+        } catch as e {
+            return {status: 0, text: "", err: "Could not reach the API: " e.Message}
+        }
+        deadline := A_TickCount + timeoutSec * 1000
+        loop {
+            done := false
+            try
+                done := req.WaitForResponse(1)
+            catch
+                done := false   ; 1s chunk elapsed; response not ready yet
+            if done
+                break
+            if (A_TickCount > deadline)
+                return {status: 0, text: "", err: "Timed out after " timeoutSec " seconds."}
+            if (onTick != "")
+                onTick.Call()
+        }
+        retryAfter := ""
         try
-            done := req.WaitForResponse(1)
-        catch
-            done := false   ; 1s chunk elapsed; response not ready yet
-        if done
-            break
-        if (A_TickCount > deadline)
-            return {status: 0, text: "", err: "Timed out after " timeoutSec " seconds."}
-        if (onTick != "")
-            onTick.Call()
+            retryAfter := req.GetResponseHeader("Retry-After")
+        return {status: req.Status, text: req.ResponseText, retryAfter: retryAfter}
     }
-    return {status: req.Status, text: req.ResponseText}
+
+    retries := 0
+    loop {
+        r := Attempt()
+        if (r.status = 0) || !HDR_ShouldRetry(r.status) || (retries >= 3)
+            return r
+        retries++
+        delayMs := HDR_RetryDelayMs(retries, r.retryAfter)
+        Toast("Claude is busy (HTTP " r.status ") - retrying in " (delayMs // 1000) " s (" retries "/3)...")
+        Sleep(delayMs)
+    }
 }
 
 ; --- Settings and toast ------------------------------------------------

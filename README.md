@@ -83,6 +83,10 @@ icon's tooltip tracks calls made and an estimated cost for the session, e.g.
 estimate from Anthropic's published per-token pricing, not a billing figure,
 and is omitted for custom/unrecognized model strings).
 
+Transient API errors (HTTP 429, 500, 502, 503, or 529 - the server is
+overloaded or rate-limited) are retried automatically up to 3 times with a
+short wait in between, so a brief outage rarely shows up as a failure.
+
 ## Run
 
 Double-click `PDFHeaderTool.ahk` (requires AutoHotkey v2). First run creates
