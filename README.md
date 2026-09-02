@@ -9,9 +9,12 @@ as plain MM/DD/YYYY; other missing fields are simply omitted.
 Imaging study reports (MRI, CT, X-ray, etc.) insert a two-part header - date
 and study type, no provider.
 
-A second floating button, **Summarize text**, sits directly above the header
-button. Select text in the PDF in Acrobat and click it (it auto-copies the
-selection - no need to press Ctrl+C yourself) to get a summary typed into
+The floating toolbar is a dark rounded pill with a drag grip on the left and
+three chips: **Queue**, **Summarize**, and **Header**. Hover a chip for its
+tooltip (with the hotkey, if one is set); while a run is in progress the
+active chip shows what's happening ("Asking 40%") over a thin progress line.
+**Summarize**: select text in the PDF in Acrobat and click it (it auto-copies
+the selection - no need to press Ctrl+C yourself) to get a summary typed into
 Word at the cursor; with no selection, it summarizes the current PDF page
 instead. By default the summary is sectioned: labeled `Subjective:`,
 `Physical Exam:`, and `Assessment & Plan:` lines, each included only when the
@@ -43,16 +46,15 @@ already inserted, press Ctrl+Z once to remove the header before retrying - a
 retry inserts a fresh header. **Insert header** is always header-only,
 regardless of this toggle.
 
-A third button, **Queue Summary**, sits above Summarize text (shown together,
-hidden together). Click it to queue the current PDF page - the label updates
-to show the count, e.g. `Queue Summary (3)`. With pages queued, clicking
+The **Queue** chip (shown and hidden together with Summarize) queues the
+current PDF page - its label shows the count, e.g. `Queue (3)`. With pages queued, clicking
 **Summarize text** summarizes all of them together as one combined entry
 (a multi-page note), ignoring any text selection. With pages queued, pressing
 **Insert header** instead reads the FIRST queued page and inserts its header
 - the page stays in the queue (it's still needed for the summary run). The
 queue holds up to 20 pages and clears automatically after a successful
 summary; a failed attempt keeps the queue so you can retry. Right-click the
-Queue button to clear it manually. The queue is session-only (not saved
+Queue chip to clear it manually. The queue is session-only (not saved
 between runs).
 
 A completion sound plays when a header or summary insert finishes, so you get
@@ -102,8 +104,7 @@ does the same thing: a toast points you at Settings, which opens for you.
 
 Open the Settings window from the tray icon (**Settings**, the first item), a
 dedicated hotkey (**F2** by default), or by right-clicking the floating
-button (right-clicking the Queue Summary button itself clears the queue
-instead). Settings covers the hotkey (or turning it off), a second optional
+toolbar (right-clicking the Queue chip itself clears the queue instead). Settings covers the hotkey (or turning it off), a second optional
 hotkey for Summarize text, a third optional hotkey for Queue Summary, a
 fourth hotkey for opening Settings itself, the header and summary models
 (plus a **Compare models on this page** button - also in the tray menu -
@@ -147,8 +148,8 @@ hand-editable if you prefer:
 - `SummaryDetail` - `concise`, `standard` (default), or `detailed` - how many sentences the three summary prompts ask for; anything else falls back to `standard`
 - `SummaryFormat` - `soap` (default) or `prose` - sectioned `Subjective:`/`Physical Exam:`/`Assessment & Plan:` lines (empty sections omitted, medical-legal findings prioritized) vs. the old plain-prose shape; anything else falls back to `soap`
 - `CustomInstructions` - free-text instructions appended to every summary prompt when non-empty; default blank
-- `ShowButton` - `1` shows the floating button, `0` hides it
-- `ShowSummarize` - `1` shows the Summarize text and Queue Summary buttons above it, `0` hides both
+- `ShowButton` - `1` shows the floating toolbar, `0` hides it
+- `ShowSummarize` - `1` shows the Summarize and Queue chips, `0` hides both (Header only)
 - `ComboInsert` - `1` (default) makes Summarize text insert the header first, then the summary below it; `0` runs the two independently
 - `Beep` - `1` plays the completion sound chosen by `SoundScheme` after each header or summary insert, `0` disables it entirely
 - `SoundScheme` - which completion sound: `wispr2` (default, Wispr Flow's newer chime), `wispr1` (Wispr's older chime), `dictstop` (Wispr's dictation-stop sound), or `beep` (the original two-tone); anything else falls back to `wispr2`. The three Wispr options are cached under `%APPDATA%\PDFHeaderTool\sounds\` the first time each is used, and fall back to the two-tone beep automatically if Wispr Flow isn't installed or a cache copy can't be made - no error shown either way

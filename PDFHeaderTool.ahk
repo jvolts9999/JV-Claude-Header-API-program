@@ -9,7 +9,7 @@
 
 ; Bump on every released iteration. Shown in the tray tooltip and the
 ; Settings window title.
-global HDR_VERSION := "2.1"
+global HDR_VERSION := "2.2"
 
 ; --- JSON --------------------------------------------------------------
 ; Minimal strict JSON parser. null parses to "" ON PURPOSE: every field
@@ -1059,14 +1059,29 @@ global PROGBAR := ""
 global SETGUI := ""
 global SUMQUEUE := []
 global QBTN := ""
+global TBCHIPS := Map()   ; toolbar chips by key: {icon, label, glyph, text, tip}
+global TBGRIP := ""
+global TBBAR := ""        ; thin progress line under the chip row
+global TBHOVER := ""      ; key of the chip under the mouse
+global TBACTIVE := ""     ; key of the chip currently showing progress
 global SESSION_CALLS := 0
 global SESSION_CENTS := 0.0
 
-; Small floating status window - text + a stepping progress bar, shown
-; near the mouse. PROG_Show creates the Gui once and reuses it on later runs.
-PROG_Show(text) {
-    global PROGGUI, PROGTEXT, PROGBAR, BTNGUI
+; Progress feedback. With the toolbar visible it lives INSIDE the active
+; chip (first word of the status plus the percent, a spinner glyph, and a
+; thin bar under the row); otherwise a small strip near the mouse - the
+; path for hotkey users who hid the toolbar, or a chip that isn't shown.
+PROG_Show(text, chip := "header") {
+    global PROGGUI, PROGTEXT, PROGBAR, BTNGUI, TBCHIPS, TBBAR, TBACTIVE
     static stripW := 260, stripInset := 6
+    if (BTNGUI != "" && DllCall("IsWindowVisible", "ptr", BTNGUI.Hwnd) && TBCHIPS.Has(chip)) {
+        TBACTIVE := chip
+        TBCHIPS[chip].icon.Text := Chr(0xE895)
+        TBCHIPS[chip].label.Text := TB_Word(text)
+        TBBAR.Value := 0
+        TBBAR.Visible := true
+        return
+    }
     if (PROGGUI = "") {
         PROGGUI := Gui("+AlwaysOnTop -Caption +ToolWindow", "PDF Header Progress")
         PROGGUI.BackColor := "0x2B2B2B"
@@ -1080,21 +1095,19 @@ PROG_Show(text) {
         PROGTEXT.Text := text
         PROGBAR.Value := 0
     }
-    if (BTNGUI != "" && DllCall("IsWindowVisible", "ptr", BTNGUI.Hwnd)) {
-        WinGetPos(&bx, &by, &bw, &bh, BTNGUI)
-        PROGTEXT.Move(6, , bw - 12)
-        PROGBAR.Move(6, , bw - 12)
-        PROGGUI.Show("x" bx " y" (by + bh) " w" bw " NoActivate")
-    } else {
-        PROGTEXT.Move(stripInset, , stripW)
-        PROGBAR.Move(stripInset, , stripW)
-        MouseGetPos(&mx, &my)
-        PROGGUI.Show("x" (mx + 16) " y" (my + 16) " w" (stripW + stripInset * 2) " NoActivate")
-    }
+    PROGTEXT.Move(stripInset, , stripW)
+    PROGBAR.Move(stripInset, , stripW)
+    MouseGetPos(&mx, &my)
+    PROGGUI.Show("x" (mx + 16) " y" (my + 16) " w" (stripW + stripInset * 2) " NoActivate")
 }
 
 PROG_Set(text, pct) {
-    global PROGGUI, PROGTEXT, PROGBAR
+    global PROGGUI, PROGTEXT, PROGBAR, TBCHIPS, TBBAR, TBACTIVE
+    if (TBACTIVE != "" && TBCHIPS.Has(TBACTIVE)) {
+        TBCHIPS[TBACTIVE].label.Text := TB_Word(text) " " pct "%"
+        TBBAR.Value := pct
+        return
+    }
     if (PROGGUI = "")
         return
     PROGTEXT.Text := text
@@ -1102,9 +1115,26 @@ PROG_Set(text, pct) {
 }
 
 PROG_Hide() {
-    global PROGGUI
+    global PROGGUI, TBCHIPS, TBBAR, TBACTIVE
+    if (TBACTIVE != "") {
+        if TBCHIPS.Has(TBACTIVE) {
+            c := TBCHIPS[TBACTIVE]
+            c.icon.Text := c.glyph
+            c.label.Text := c.text
+            TBBAR.Visible := false
+        }
+        TBACTIVE := ""
+        SUMQ_UpdateLabel()
+    }
     if (PROGGUI != "")
         PROGGUI.Hide()
+}
+
+; First word of a status string minus trailing punctuation - what fits in a
+; chip: "Asking Claude (page 3)..." -> "Asking".
+TB_Word(text) {
+    RegExMatch(text, "^\S+", &m)
+    return m ? RegExReplace(m[0], "[.:(]+$", "") : text
 }
 
 RunInsert(*) {
@@ -1341,7 +1371,7 @@ RunSummarizeCore(&savedClip, summaryAt := -1) {
     ; the result. Returns true/false so the queue branch below knows whether to
     ; clear itself (only ever cleared on a confirmed successful insert).
     SummarizeAndInsert(body, progText) {
-        PROG_Show(progText)
+        PROG_Show(progText, "summarize")
         pct := 10
         Tick() {
             pct := Min(pct + 10, 90)
@@ -1431,7 +1461,7 @@ SUMQ_UpdateLabel() {
     if (QBTN = "")
         return
     n := SUMQUEUE.Length
-    QBTN.Text := (n > 0) ? "Queue Summary (" n ")" : "Queue Summary"
+    QBTN.Text := (n > 0) ? "Queue (" n ")" : "Queue"
 }
 
 RunQueue(*) {
@@ -1486,38 +1516,100 @@ RunQueueClear() {
     Toast("Queue cleared.")
 }
 
+; The floating toolbar: a dark rounded pill with a drag grip and one chip per
+; action (icon glyph + label, both clickable as one button). Chips are Text
+; controls because classic Win32 buttons can't be recolored on a dark window.
 MakeButton() {
-    global CFG, BTNGUI, QBTN
+    global CFG, BTNGUI, QBTN, TBCHIPS, TBGRIP, TBBAR, TBHOVER, TBACTIVE
     BTNGUI := Gui("+AlwaysOnTop -Caption +ToolWindow", "PDF Header")
-    BTNGUI.BackColor := "0x2B2B2B"
-    BTNGUI.MarginX := 8
-    BTNGUI.MarginY := 8
-    BTNGUI.SetFont("s10 bold")
+    BTNGUI.BackColor := "0x1F1F1F"
+    BTNGUI.MarginX := 6
+    BTNGUI.MarginY := 6
+    ; DWMWA_WINDOW_CORNER_PREFERENCE (33) = DWMWCP_ROUND (2): Win11 only, a no-op elsewhere
+    try DllCall("dwmapi\DwmSetWindowAttribute", "ptr", BTNGUI.Hwnd, "uint", 33, "int*", 2, "uint", 4)
+    TBCHIPS := Map()
+    TBHOVER := ""
+    TBACTIVE := ""
+    BTNGUI.SetFont("s12", "Segoe MDL2 Assets")
+    TBGRIP := BTNGUI.AddText("w14 h36 Center 0x200 c0x808080", Chr(0xE784))
     if CFG.showSummarize {
-        QBTN := BTNGUI.AddButton("w110 h34", "Queue Summary")
-        QBTN.OnEvent("Click", RunQueue)
-        SUMQ_UpdateLabel()
-        sb := BTNGUI.AddButton("w110 h34 y+8", "Summarize text")
-        sb.OnEvent("Click", RunSummarize)
-        b := BTNGUI.AddButton("w110 h34 y+8", "Insert header")
-    } else {
-        QBTN := ""
-        b := BTNGUI.AddButton("w110 h34", "Insert header")
+        TB_AddChip("queue", Chr(0xE710), "Queue", 76, RunQueue,
+            TB_Tip("Queue this PDF page for a multi-page summary; right-click clears the queue", CFG.queueHotkey))
+        TB_AddChip("summarize", Chr(0xE8FD), "Summarize", 96, RunSummarize,
+            TB_Tip("Summarize the selection, this page, or the queue", CFG.summarizeHotkey))
     }
-    b.OnEvent("Click", RunInsert)
+    TB_AddChip("header", Chr(0xE8A5), "Header", 76, RunInsert,
+        TB_Tip("Insert the header for this page", CFG.hotkey))
+    QBTN := TBCHIPS.Has("queue") ? TBCHIPS["queue"].label : ""
+    SUMQ_UpdateLabel()
+    TBCHIPS["header"].label.GetPos(&lx, , &lw)
+    TBBAR := BTNGUI.AddProgress("xm y+3 w" (lx + lw - 6) " h3 Hidden Background0x2F2F2F c0x8AB4F8", 0)
     BTNGUI.OnEvent("ContextMenu", HDR_ButtonContextMenu)
-    ; Drag anywhere on the window edge (the margin around the button).
+    ; Drag by the grip or any bare bit of the pill (margins, gaps between chips).
     OnMessage(0x201, HDR_Drag)      ; WM_LBUTTONDOWN
     OnMessage(0x232, HDR_DragEnd)   ; WM_EXITSIZEMOVE
+    SetTimer(TB_HoverTick, 80)
     if (CFG.btnX != "" && CFG.btnY != "")
         BTNGUI.Show("x" CFG.btnX " y" CFG.btnY " NoActivate")
     else
         BTNGUI.Show("NoActivate")
 }
 
+TB_AddChip(key, glyph, text, labelW, action, tip) {
+    global BTNGUI, TBCHIPS
+    BTNGUI.SetFont("s12", "Segoe MDL2 Assets")
+    icon := BTNGUI.AddText("x+6 yp w28 h36 Center 0x200 Background0x2F2F2F c0x8AB4F8", glyph)
+    BTNGUI.SetFont("s10", "Segoe UI")
+    label := BTNGUI.AddText("x+0 yp w" labelW " h36 0x200 Background0x2F2F2F cWhite", text)
+    icon.OnEvent("Click", action)
+    label.OnEvent("Click", action)
+    TBCHIPS[key] := {icon: icon, label: label, glyph: glyph, text: text, tip: tip}
+}
+
+TB_Tip(base, hk) {
+    return base (hk != "" ? "  [" hk "]" : "")
+}
+
+TB_Paint(key, color) {
+    global TBCHIPS
+    c := TBCHIPS[key]
+    c.icon.Opt("Background" color)
+    c.icon.Redraw()
+    c.label.Opt("Background" color)
+    c.label.Redraw()
+}
+
+; Hover highlight + tooltip, polled because Text controls have no hover
+; event. Tooltip slot 2 keeps it clear of Toast(), which owns slot 1.
+TB_HoverTick() {
+    global BTNGUI, TBCHIPS, TBHOVER
+    if (BTNGUI = "")
+        return
+    MouseGetPos(, , &winHwnd, &ctrlHwnd, 2)
+    over := ""
+    if (winHwnd = BTNGUI.Hwnd) {
+        for key, c in TBCHIPS {
+            if (ctrlHwnd = c.icon.Hwnd || ctrlHwnd = c.label.Hwnd)
+                over := key
+        }
+    }
+    if (over = TBHOVER)
+        return
+    if (TBHOVER != "" && TBCHIPS.Has(TBHOVER))
+        TB_Paint(TBHOVER, "0x2F2F2F")
+    TBHOVER := over
+    if (over != "") {
+        TB_Paint(over, "0x454545")
+        ToolTip(TBCHIPS[over].tip, , , 2)
+    } else
+        ToolTip(, , , 2)
+}
+
 HDR_Drag(wParam, lParam, msg, hwnd) {
-    global BTNGUI
-    if (BTNGUI != "" && hwnd = BTNGUI.Hwnd)
+    global BTNGUI, TBGRIP
+    if (BTNGUI = "")
+        return
+    if (hwnd = BTNGUI.Hwnd || (TBGRIP != "" && hwnd = TBGRIP.Hwnd))
         PostMessage(0xA1, 2, 0, , BTNGUI)  ; WM_NCLBUTTONDOWN, HTCAPTION
 }
 
@@ -1536,8 +1628,9 @@ HDR_DragEnd(wParam, lParam, msg, hwnd) {
 ; was right-clicked. The Queue button clears the queue; anywhere else opens
 ; Settings, same as before this button existed.
 HDR_ButtonContextMenu(GuiObj, GuiCtrlObj, Item, IsRightClick, X, Y) {
-    global QBTN
-    if (QBTN != "" && GuiCtrlObj = QBTN)
+    global TBCHIPS
+    if (TBCHIPS.Has("queue") && GuiCtrlObj != ""
+        && (GuiCtrlObj = TBCHIPS["queue"].icon || GuiCtrlObj = TBCHIPS["queue"].label))
         RunQueueClear()
     else
         ShowSettingsGui()
@@ -1971,6 +2064,8 @@ ShowSettingsGui() {
         ; control if the button stays hidden (MakeButton would otherwise be
         ; the only thing that clears it, and it's skipped in that case).
         if (BTNGUI != "") {
+            SetTimer(TB_HoverTick, 0)
+            ToolTip(, , , 2)
             BTNGUI.Destroy()
             BTNGUI := ""
             QBTN := ""
