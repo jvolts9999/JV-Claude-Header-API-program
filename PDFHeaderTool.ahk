@@ -483,11 +483,11 @@ EstimateCents(model, inTok, outTok) {
 ; Called once per HTTP-200 response in either pipeline. Updates the session
 ; globals and the tray tooltip; the cost clause is omitted entirely when the
 ; model's pricing is unknown, rather than showing a wrong number.
-HDR_TrackUsage(responseText) {
-    global SESSION_CALLS, SESSION_CENTS, CFG
+HDR_TrackUsage(responseText, model) {
+    global SESSION_CALLS, SESSION_CENTS
     SESSION_CALLS++
     u := ExtractUsage(responseText)
-    cents := EstimateCents(CFG.model, u.inTok, u.outTok)
+    cents := EstimateCents(model, u.inTok, u.outTok)
     tip := "PDF Header Tool v" HDR_VERSION " - " SESSION_CALLS " calls"
     if (cents >= 0) {
         SESSION_CENTS += cents
@@ -603,6 +603,7 @@ LoadSettings(p := "") {
             . "QueueHotkey=`n"
             . "SettingsHotkey=F2`n"
             . "Model=claude-opus-5`n"
+            . "HeaderModel=claude-sonnet-5`n"
             . "ShowButton=1`n"
             . "ShowSummarize=1`n"
             . "ButtonX=`n"
@@ -629,6 +630,7 @@ LoadSettings(p := "") {
         queueHotkey: Trim(IniRead(p, "Settings", "QueueHotkey", "")),
         settingsHotkey: Trim(IniRead(p, "Settings", "SettingsHotkey", "F2")),
         model: Trim(IniRead(p, "Settings", "Model", "claude-opus-5")),
+        headerModel: Trim(IniRead(p, "Settings", "HeaderModel", "claude-sonnet-5")),
         showButton: Trim(IniRead(p, "Settings", "ShowButton", "1")) = "1",
         showSummarize: Trim(IniRead(p, "Settings", "ShowSummarize", "1")) = "1",
         btnX: Trim(IniRead(p, "Settings", "ButtonX", "")),
@@ -1171,7 +1173,7 @@ RunInsertCore(combo := false) {
         pct := Min(pct + 10, 90)
         PROG_Set(askMsg, pct)
     }
-    r := CallClaude(BuildRequestBody(b64, CFG.model), CFG.apiKey, , TickAsk)
+    r := CallClaude(BuildRequestBody(b64, CFG.headerModel), CFG.apiKey, , TickAsk)
     if (r.status = 0) {
         Toast(r.err)
         HDR_Chime(false)
@@ -1183,7 +1185,7 @@ RunInsertCore(combo := false) {
         HDR_Chime(false)
         return false
     }
-    HDR_TrackUsage(r.text)
+    HDR_TrackUsage(r.text, CFG.headerModel)
     if !f.ok {
         Toast(f.err)
         HDR_Chime(false)
@@ -1203,6 +1205,78 @@ RunInsertCore(combo := false) {
     if !w.ok
         return false
     return w
+}
+
+; Tray / Settings "Compare models on this page": runs the header extraction
+; for Acrobat's current page through every ModelOptions entry, one after
+; another, and shows the resulting headers with seconds and cents - nothing
+; is inserted into Word. The queue is deliberately ignored so the comparison
+; is always about the page on screen.
+RunCompareModels(*) {
+    global BUSY
+    if BUSY
+        return
+    BUSY := true
+    try
+        RunCompareModelsCore()
+    catch as e
+        Toast("Error: " e.Message)
+    finally {
+        BUSY := false
+        PROG_Hide()
+    }
+}
+
+RunCompareModelsCore() {
+    global CFG
+    if (CFG.apiKey = "") {
+        CFG := LoadSettings()
+        if (CFG.apiKey = "") {
+            Toast("No API key yet - paste it into Settings and save.")
+            ShowSettingsGui()
+            return
+        }
+    }
+    PROG_Show("Reading page...")
+    g := GrabCurrentPage()
+    if !g.ok {
+        Toast(g.err)
+        HDR_Chime(false)
+        return
+    }
+    b64 := FileToBase64(g.pdfPath)
+    try FileDelete(g.pdfPath)
+    msg := ""
+    pct := 10
+    Tick() {
+        pct := Min(pct + 10, 90)
+        PROG_Set(msg, pct)
+    }
+    report := ""
+    anyOk := false
+    for m in ModelOptions() {
+        msg := "Comparing " m.label "..."
+        pct := 10
+        PROG_Show(msg)
+        t0 := A_TickCount
+        r := CallClaude(BuildRequestBody(b64, m.id), CFG.apiKey, , Tick)
+        line1 := m.label " - " Format("{:.1f}", (A_TickCount - t0) / 1000) " s"
+        if (r.status = 200) {
+            f := ExtractFields(r.text)
+            HDR_TrackUsage(r.text, m.id)
+            u := ExtractUsage(r.text)
+            cents := EstimateCents(m.id, u.inTok, u.outTok)
+            if (cents >= 0)
+                line1 .= ", " Format("{:.1f}", cents) " cents"
+            line2 := f.ok ? BuildHeader(f.date, f.provider, f.notetype, !f.imaging).text : "ERROR: " f.err
+            anyOk := anyOk || f.ok
+        } else {
+            line2 := (r.status = 0) ? r.err : "API error HTTP " r.status
+        }
+        report .= (report = "" ? "" : "`n`n") line1 "`n" line2
+    }
+    HDR_Chime(anyOk)
+    MsgBox(report, "PDF Header Tool - model comparison (page " g.pageNum ")", "Iconi")
 }
 
 RunSummarize(*) {
@@ -1285,7 +1359,7 @@ RunSummarizeCore(&savedClip, summaryAt := -1) {
             HDR_Chime(false)
             return false
         }
-        HDR_TrackUsage(r.text)
+        HDR_TrackUsage(r.text, CFG.model)
         if !t.ok {
             Toast(t.err)
             HDR_Chime(false)
@@ -1551,31 +1625,40 @@ ShowSettingsGui() {
         hkCtl4.Enabled := !noHotkeyChk4.Value
     }
 
-    SETGUI.AddText("xm y+12", "Model:").SetFont("cWhite")
-    labels := []
-    for m in mo
-        labels.Push(m.label)
-    modelIdx := 0
-    for i, m in mo {
-        if (m.id = CFG.model) {
-            modelIdx := i
-            break
+    ; One picker per model role: the ModelOptions labels (plus a "Custom: <id>"
+    ; entry when the saved id is not one of them) and a note that follows the
+    ; selection. Returns the dropdown; Save maps its index back to an id.
+    AddModelPicker(caption, currentId) {
+        SETGUI.AddText("xm y+12", caption).SetFont("cWhite")
+        labels := []
+        for m in mo
+            labels.Push(m.label)
+        idx := 0
+        for i, m in mo {
+            if (m.id = currentId) {
+                idx := i
+                break
+            }
         }
+        if (idx = 0) {
+            labels.Push("Custom: " currentId)
+            idx := labels.Length
+        }
+        ddl := SETGUI.AddDropDownList("w300 x+10 yp-2 Choose" idx, labels)
+        note := SETGUI.AddText("xm y+6 w300 r3",
+            (idx <= mo.Length) ? ModelNoteFor(mo[idx].id) : "Custom model string from settings file.")
+        note.SetFont("cWhite")
+        OnPick(*) {
+            note.Text := (ddl.Value >= 1 && ddl.Value <= mo.Length)
+                ? ModelNoteFor(mo[ddl.Value].id) : "Custom model string from settings file."
+        }
+        ddl.OnEvent("Change", OnPick)
+        return ddl
     }
-    if (modelIdx = 0) {
-        labels.Push("Custom: " CFG.model)
-        modelIdx := labels.Length
-    }
-    modelDDL := SETGUI.AddDropDownList("w300 x+10 yp-2 Choose" modelIdx, labels)
-    modelNoteTxt := SETGUI.AddText("xm y+6 w300 r3",
-        (modelIdx <= mo.Length) ? ModelNoteFor(mo[modelIdx].id) : "Custom model string from settings file.")
-    modelNoteTxt.SetFont("cWhite")
-    modelDDL.OnEvent("Change", SETGUI_ModelChanged)
-    SETGUI_ModelChanged(*) {
-        idx := modelDDL.Value
-        modelNoteTxt.Text := (idx >= 1 && idx <= mo.Length)
-            ? ModelNoteFor(mo[idx].id) : "Custom model string from settings file."
-    }
+    headerModelDDL := AddModelPicker("Header model:", CFG.headerModel)
+    summaryModelDDL := AddModelPicker("Summary model:", CFG.model)
+    compareBtn := SETGUI.AddButton("xm y+8 w220", "Compare models on this page")
+    compareBtn.OnEvent("Click", RunCompareModels)
 
     SETGUI.AddText("xm y+12", "Font:").SetFont("cWhite")
     fonts := ["Times New Roman", "Calibri", "Cambria", "Georgia", "Arial", "Book Antiqua"]
@@ -1812,7 +1895,9 @@ ShowSettingsGui() {
             }
         }
 
-        selIdx := modelDDL.Value
+        hIdx := headerModelDDL.Value
+        newHeaderModel := (hIdx >= 1 && hIdx <= mo.Length) ? mo[hIdx].id : CFG.headerModel
+        selIdx := summaryModelDDL.Value
         newModel := (selIdx >= 1 && selIdx <= mo.Length) ? mo[selIdx].id : CFG.model
         newFont := fontCombo.Text
         newSize := HDR_ValidSize(sizeEdit.Text)
@@ -1837,6 +1922,7 @@ ShowSettingsGui() {
         IniWrite(newQueueHotkey, CFG.path, "Settings", "QueueHotkey")
         IniWrite(newSettingsHotkey, CFG.path, "Settings", "SettingsHotkey")
         IniWrite(newModel, CFG.path, "Settings", "Model")
+        IniWrite(newHeaderModel, CFG.path, "Settings", "HeaderModel")
         IniWrite(newFont, CFG.path, "Settings", "HeaderFont")
         IniWrite(newSize, CFG.path, "Settings", "HeaderSize")
         IniWrite(newSummaryFont, CFG.path, "Settings", "SummaryFont")
@@ -1860,6 +1946,7 @@ ShowSettingsGui() {
         CFG.queueHotkey := newQueueHotkey
         CFG.settingsHotkey := newSettingsHotkey
         CFG.model := newModel
+        CFG.headerModel := newHeaderModel
         CFG.headerFont := newFont
         CFG.headerSize := newSize
         CFG.summaryFont := newSummaryFont
@@ -2036,9 +2123,10 @@ Main() {
         MakeButton()
     A_TrayMenu.Insert("1&", "Settings", (*) => ShowSettingsGui())
     A_TrayMenu.Insert("2&", "Insert header now", RunInsert)
-    A_TrayMenu.Insert("3&", "Clear queue", (*) => RunQueueClear())
-    A_TrayMenu.Insert("4&", "Open settings file", (*) => Run('notepad.exe "' CFG.path '"'))
-    A_TrayMenu.Insert("5&", "Reload", (*) => Reload())
+    A_TrayMenu.Insert("3&", "Compare models on this page", RunCompareModels)
+    A_TrayMenu.Insert("4&", "Clear queue", (*) => RunQueueClear())
+    A_TrayMenu.Insert("5&", "Open settings file", (*) => Run('notepad.exe "' CFG.path '"'))
+    A_TrayMenu.Insert("6&", "Reload", (*) => Reload())
     Persistent(true)
 }
 

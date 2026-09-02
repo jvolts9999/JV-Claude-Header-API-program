@@ -18,8 +18,10 @@ instead. By default the summary is sectioned: labeled `Subjective:`,
 source actually documents it, and written to prioritize findings of
 potential medical-legal significance (sentinel events, complications, new or
 missed findings, deviations from expected care, turning points in the care).
-Switch to plain prose instead in Settings (**Summary format**). Uses the
-same Claude model as the header button. Summary length is set in Settings
+Switch to plain prose instead in Settings (**Summary format**). Summaries
+use their own model (**Summary model**, default Opus 5), separate from the
+header's (**Header model**, default Sonnet 5 - the four-field extraction is
+quick work that doesn't need the biggest model). Summary length is set in Settings
 (**Summary detail**: Concise = 1-2 sentences, Standard = 2-4 sentences
 (default), Detailed = 4-8 sentences covering relevant history too - counted
 across all sections in the default sectioned format). The summary is typed
@@ -103,7 +105,11 @@ dedicated hotkey (**F2** by default), or by right-clicking the floating
 button (right-clicking the Queue Summary button itself clears the queue
 instead). Settings covers the hotkey (or turning it off), a second optional
 hotkey for Summarize text, a third optional hotkey for Queue Summary, a
-fourth hotkey for opening Settings itself, the model, the header font and
+fourth hotkey for opening Settings itself, the header and summary models
+(plus a **Compare models on this page** button - also in the tray menu -
+that runs Acrobat's current page through all three models and shows the
+three resulting headers with seconds and cents, about 3 cents and 25 seconds
+per comparison, nothing inserted into Word), the header font and
 size, the
 summary font and size, the summary detail level (Concise/Standard/Detailed),
 the summary format (Sectioned (SOAP), the default, or Prose) and custom
@@ -128,7 +134,8 @@ hand-editable if you prefer:
 - `SummarizeHotkey` - default blank (no hotkey); triggers Summarize text (including the queue, if pages are queued)
 - `QueueHotkey` - default blank (no hotkey); triggers Queue Summary (queues the current page)
 - `SettingsHotkey` - default `F2` (unlike the other three, this one is on by default); opens the Settings window
-- `Model` - default `claude-opus-5`; cheaper alternatives: `claude-sonnet-5` (about 1 cent/press) or `claude-haiku-4-5` (about half a cent/press). Change the line, then Reload from the tray menu.
+- `HeaderModel` - model for the header extraction; default `claude-sonnet-5` (about 1 cent/press). `claude-opus-5` is the most accurate on faint or messy scans (2-3 cents/press); `claude-haiku-4-5` the fastest and cheapest (about half a cent). Use **Compare models on this page** to pick by evidence
+- `Model` - model for summaries; default `claude-opus-5`, same three choices. Both are set in Settings, or edit the lines and Reload from the tray menu
 - `HeaderFont` - default `Times New Roman`
 - `HeaderSize` - default `20`
 - `ApplyHeadingStyle` - `1` applies Heading 1 style to the header, `0` inserts it as plain text (font settings still apply)

@@ -583,5 +583,17 @@ AssertEq(HDR_PageCite([412, 415], ["WH000412", "WH000415"], "label"), "(WH000412
 AssertEq(HDR_PageCite([412, 413], ["WH000412", ""], "label"), "(pp. 412-413)", "pagecite label missing falls back to numbers")
 AssertEq(HDR_PageCite([414, 412, 413], ["WH000414", "WH000412", "WH000413"], "label"), "(WH000412-WH000414)", "pagecite labels stay paired through sort")
 
+; ---- Separate header / summary models ----
+sPath26 := A_Temp "\pdfheadertool_settings_t26.ini"
+try FileDelete(sPath26)
+cfg26 := LoadSettings(sPath26)
+AssertEq(cfg26.headerModel, "claude-sonnet-5", "header model default sonnet")
+AssertEq(cfg26.model, "claude-opus-5", "summary model default still opus")
+IniWrite("claude-haiku-4-5", sPath26, "Settings", "HeaderModel")
+cfg26 := LoadSettings(sPath26)
+AssertEq(cfg26.headerModel, "claude-haiku-4-5", "header model override read")
+AssertEq(cfg26.model, "claude-opus-5", "summary model unaffected by header override")
+FileDelete(sPath26)
+
 FileAppend((TestFails ? "FAILED " TestFails "/" TestCount : "PASSED " TestCount) " tests`n", "*")
 ExitApp(TestFails)
