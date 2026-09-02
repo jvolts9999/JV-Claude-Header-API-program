@@ -550,5 +550,38 @@ AssertEq(HDR_RetryDelayMs(1, "abc"), 2000, "retrydelay non-numeric retry-after f
 AssertEq(HDR_RetryDelayMs(1, 0), 2000, "retrydelay zero retry-after falls back to schedule")
 AssertEq(HDR_RetryDelayMs(1, -5), 2000, "retrydelay negative retry-after falls back to schedule")
 
+; ---- Page citation (HDR_ValidCite / PageCite setting / HDR_PageCite) ----
+
+; HDR_ValidCite
+AssertEq(HDR_ValidCite("label"), "label", "validcite passthrough")
+AssertEq(HDR_ValidCite("OFF"), "off", "validcite case-insensitive")
+AssertEq(HDR_ValidCite("garbage"), "number", "validcite garbage falls back to number")
+
+; LoadSettings: pageCite
+sPath25 := A_Temp "\pdfheadertool_settings_t25.ini"
+try FileDelete(sPath25)
+cfg25 := LoadSettings(sPath25)
+AssertEq(cfg25.pageCite, "number", "page cite default number")
+IniWrite("label", sPath25, "Settings", "PageCite")
+cfg25 := LoadSettings(sPath25)
+AssertEq(cfg25.pageCite, "label", "page cite override read")
+FileDelete(sPath25)
+
+; HDR_PageCite: number mode
+AssertEq(HDR_PageCite([412], [""], "off"), "", "pagecite off is empty")
+AssertEq(HDR_PageCite([], [], "number"), "", "pagecite no pages is empty")
+AssertEq(HDR_PageCite([412], [""], "number"), "(p. 412)", "pagecite single page")
+AssertEq(HDR_PageCite([412, 413, 414, 415], ["", "", "", ""], "number"), "(pp. 412-415)", "pagecite contiguous range")
+AssertEq(HDR_PageCite([412, 415, 420], ["", "", ""], "number"), "(pp. 412, 415, 420)", "pagecite non-contiguous list")
+AssertEq(HDR_PageCite([415, 412, 413, 414], ["", "", "", ""], "number"), "(pp. 412-415)", "pagecite unsorted input sorted")
+AssertEq(HDR_PageCite([412, 412, 413], ["", "", ""], "number"), "(pp. 412-413)", "pagecite duplicates removed")
+
+; HDR_PageCite: label mode (Bates), falling back to numbers when any label is missing
+AssertEq(HDR_PageCite([412], ["WH000412"], "label"), "(WH000412)", "pagecite single label")
+AssertEq(HDR_PageCite([412, 413, 414], ["WH000412", "WH000413", "WH000414"], "label"), "(WH000412-WH000414)", "pagecite label range")
+AssertEq(HDR_PageCite([412, 415], ["WH000412", "WH000415"], "label"), "(WH000412, WH000415)", "pagecite label non-contiguous")
+AssertEq(HDR_PageCite([412, 413], ["WH000412", ""], "label"), "(pp. 412-413)", "pagecite label missing falls back to numbers")
+AssertEq(HDR_PageCite([414, 412, 413], ["WH000414", "WH000412", "WH000413"], "label"), "(WH000412-WH000414)", "pagecite labels stay paired through sort")
+
 FileAppend((TestFails ? "FAILED " TestFails "/" TestCount : "PASSED " TestCount) " tests`n", "*")
 ExitApp(TestFails)

@@ -1,9 +1,11 @@
 # PDF Header Tool
 
 One keypress (F8) or one click while reading a medical-record PDF in Acrobat
-Pro inserts a `MM/DD/YYYY — Provider — Note Type` Heading 1 at the Word
-cursor. A missing date is inserted as plain MM/DD/YYYY; other missing fields
-are simply omitted.
+Pro inserts a `MM/DD/YYYY — Provider — Note Type (p. 412)` Heading 1 at the
+Word cursor - the source page is cited at the end (a queued multi-page note
+cites its span, `(pp. 412-415)`; switch to the PDF's page labels for Bates
+numbers, or off, in Settings (**Page citation**)). A missing date is inserted
+as plain MM/DD/YYYY; other missing fields are simply omitted.
 Imaging study reports (MRI, CT, X-ray, etc.) insert a two-part header - date
 and study type, no provider.
 
@@ -107,7 +109,8 @@ summary font and size, the summary detail level (Concise/Standard/Detailed),
 the summary format (Sectioned (SOAP), the default, or Prose) and custom
 summary instructions, whether the header uses Heading 1 style and bold, how
 many blank lines follow
-it, showing or hiding the floating button and the Summarize/Queue buttons, the
+it, the page citation appended to each header, showing or hiding the floating
+button and the Summarize/Queue buttons, the
 one-press header+summary combo, the completion beep, and which sound it
 plays. No two of the four
 hotkeys can be set to the same key. The API key is set via Settings ->
@@ -131,6 +134,7 @@ hand-editable if you prefer:
 - `ApplyHeadingStyle` - `1` applies Heading 1 style to the header, `0` inserts it as plain text (font settings still apply)
 - `HeaderBold` - `1` forces the header bold, `0` leaves the style's own weight untouched
 - `LinesBelow` - blank lines inserted after the header, `0`-`3`, default `2`
+- `PageCite` - `number` (default) appends the Acrobat page number to each header as `(p. 412)` (a queued multi-page note gets its span, `(pp. 412-415)`); `label` uses the PDF's page label instead, which productions usually set to the Bates number, falling back to the page number for pages without a label; `off` appends nothing. Anything else falls back to `number`
 - `SummaryFont` - default `Times New Roman`; font used for inserted summaries
 - `SummarySize` - default `12`; size used for inserted summaries
 - `SummaryDetail` - `concise`, `standard` (default), or `detailed` - how many sentences the three summary prompts ask for; anything else falls back to `standard`

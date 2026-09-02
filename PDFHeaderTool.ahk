@@ -215,6 +215,55 @@ BuildHeader(dateRaw, provider, noteType, includeProvider := true) {
     return {text: text, marks: []}
 }
 
+; Pure: the source-page citation appended to a header. pages are 1-based
+; page numbers in queue order (unsorted, duplicates possible), labels the
+; matching PDF page labels ("" = none), mode off/number/label. Label mode
+; only holds when EVERY page has a label - otherwise numbers are used, so a
+; production with a few unlabeled pages never mixes the two styles.
+HDR_PageCite(pages, labels, mode) {
+    if (mode = "off" || pages.Length = 0)
+        return ""
+    byPage := Map()
+    for i, pg in pages
+        byPage[Integer(pg)] := (labels.Length >= i) ? labels[i] : ""
+    nums := []
+    for pg in byPage
+        nums.Push(pg)
+    ; insertion sort: the queue holds at most 20 pages
+    loop nums.Length - 1 {
+        i := A_Index + 1
+        v := nums[i]
+        j := i - 1
+        while (j >= 1 && nums[j] > v) {
+            nums[j + 1] := nums[j]
+            j--
+        }
+        nums[j + 1] := v
+    }
+    useLabels := (mode = "label")
+    if useLabels {
+        for pg in nums {
+            if (byPage[pg] = "")
+                useLabels := false
+        }
+    }
+    contiguous := true
+    loop nums.Length - 1 {
+        if (nums[A_Index + 1] != nums[A_Index] + 1)
+            contiguous := false
+    }
+    item(k) => useLabels ? byPage[nums[k]] : nums[k]
+    pre := useLabels ? "" : (nums.Length = 1 ? "p. " : "pp. ")
+    if (nums.Length = 1)
+        return "(" pre item(1) ")"
+    if contiguous
+        return "(" pre item(1) "-" item(nums.Length) ")"
+    out := ""
+    loop nums.Length
+        out .= (A_Index = 1 ? "" : ", ") item(A_Index)
+    return "(" pre out ")"
+}
+
 ; --- Claude API --------------------------------------------------------
 ModelWantsFallbacks(model) {
     return (SubStr(model, 1, 13) = "claude-opus-5" || SubStr(model, 1, 12) = "claude-fable")
@@ -570,7 +619,8 @@ LoadSettings(p := "") {
             . "CustomInstructions=`n"
             . "Beep=1`n"
             . "SoundScheme=wispr2`n"
-            . "ComboInsert=1`n", p, "UTF-16")
+            . "ComboInsert=1`n"
+            . "PageCite=number`n", p, "UTF-16")
     }
     return {path: p, firstRun: firstRun,
         apiKey: Trim(IniRead(p, "Settings", "ApiKey", "")),
@@ -595,7 +645,8 @@ LoadSettings(p := "") {
         customInstructions: HDR_DecodeMultiline(Trim(IniRead(p, "Settings", "CustomInstructions", ""))),
         beep: Trim(IniRead(p, "Settings", "Beep", "1")) = "1",
         soundScheme: HDR_ValidScheme(Trim(IniRead(p, "Settings", "SoundScheme", "wispr2"))),
-        comboInsert: Trim(IniRead(p, "Settings", "ComboInsert", "1")) = "1"}
+        comboInsert: Trim(IniRead(p, "Settings", "ComboInsert", "1")) = "1",
+        pageCite: HDR_ValidCite(Trim(IniRead(p, "Settings", "PageCite", "number")))}
 }
 
 ; Canonicalizes a SummaryDetail ini value to lowercase concise/standard/detailed;
@@ -617,6 +668,13 @@ HDR_ValidFormat(v) {
 HDR_ValidScheme(v) {
     lv := StrLower(Trim(v))
     return (lv = "wispr2" || lv = "wispr1" || lv = "dictstop" || lv = "beep") ? lv : "wispr2"
+}
+
+; Canonicalizes a PageCite ini value to lowercase off/number/label; anything
+; else (garbage, blank, wrong case) falls back to number.
+HDR_ValidCite(v) {
+    lv := StrLower(Trim(v))
+    return (lv = "off" || lv = "label") ? lv : "number"
 }
 
 HDR_ValidSize(v, fallback := 20) {
@@ -869,6 +927,13 @@ GrabCurrentPage() {
     pageNum := avdoc.GetAVPageView().GetPageNum()  ; 0-based
     srcPD := avdoc.GetPDDoc()
     docName := srcPD.GetFileName()
+    ; PDF page label (productions usually put the Bates number here). Blank
+    ; when the PDF has no labels - Acrobat then just echoes the page number -
+    ; or when the JS bridge is unavailable.
+    pageLabel := ""
+    try pageLabel := String(srcPD.GetJSObject().getPageLabel(pageNum))
+    if (pageLabel = pageNum + 1)
+        pageLabel := ""
     tmp := A_Temp "\PDFHeaderTool_page.pdf"
     try FileDelete(tmp)
     newPD := ComObject("AcroExch.PDDoc")
@@ -881,7 +946,7 @@ GrabCurrentPage() {
     newPD.Close()
     if !saved
         return {ok: false, err: "Could not save the extracted page."}
-    return {ok: true, pdfPath: tmp, pageNum: pageNum + 1, docName: docName}
+    return {ok: true, pdfPath: tmp, pageNum: pageNum + 1, pageLabel: pageLabel, docName: docName}
 }
 
 ; --- Word --------------------------------------------------------------
@@ -1069,10 +1134,16 @@ RunInsertCore(combo := false) {
     ; queued entry is read (and NOT deleted - the queue still owns that file,
     ; needed later for a queued summary run). Empty queue -> unchanged
     ; GrabCurrentPage path below.
+    citePages := []
+    citeLabels := []
     if (SUMQUEUE.Length > 0) {
         pageNum := SUMQUEUE[1].pageNum
         PROG_Show("Reading queued page " pageNum "...")
         b64 := FileToBase64(SUMQUEUE[1].pdfPath)
+        for q in SUMQUEUE {
+            citePages.Push(q.pageNum)
+            citeLabels.Push(q.HasOwnProp("pageLabel") ? q.pageLabel : "")
+        }
     } else {
         PROG_Show("Reading page...")
         g := GrabCurrentPage()
@@ -1084,6 +1155,8 @@ RunInsertCore(combo := false) {
         b64 := FileToBase64(g.pdfPath)
         try FileDelete(g.pdfPath)
         pageNum := g.pageNum
+        citePages := [g.pageNum]
+        citeLabels := [g.pageLabel]
     }
     try
         ComObjActive("Word.Application")
@@ -1118,6 +1191,9 @@ RunInsertCore(combo := false) {
     }
     PROG_Set("Inserting...", 95)
     hdr := BuildHeader(f.date, f.provider, f.notetype, !f.imaging)
+    cite := HDR_PageCite(citePages, citeLabels, CFG.pageCite)
+    if (cite != "")
+        hdr.text .= " " cite
     ; combo forces at least one blank line so the summary phase always has a
     ; separating blank to land on (see the summaryAt derivation in RunSummarize).
     linesEff := combo ? Max(CFG.linesBelow, 1) : CFG.linesBelow
@@ -1318,7 +1394,7 @@ RunQueueCore() {
         return
     }
     try FileDelete(g.pdfPath)
-    SUMQUEUE.Push({pdfPath: qPath, pageNum: g.pageNum})
+    SUMQUEUE.Push({pdfPath: qPath, pageNum: g.pageNum, pageLabel: g.pageLabel})
     SUMQ_UpdateLabel()
     Toast("Page " g.pageNum " queued (count of " SUMQUEUE.Length ").")
 }
@@ -1571,6 +1647,14 @@ ShowSettingsGui() {
 
     SETGUI.AddText("xm y+12", "Blank lines below:").SetFont("cWhite")
     linesDDL := SETGUI.AddDropDownList("w60 x+10 yp-2 Choose" (CFG.linesBelow + 1), ["0", "1", "2", "3"])
+    SETGUI.AddText("x+16 yp+2", "Page citation:").SetFont("cWhite")
+    citeTokens := ["off", "number", "label"]
+    citeIdx := 2
+    for i, t in citeTokens {
+        if (t = CFG.pageCite)
+            citeIdx := i
+    }
+    citeDDL := SETGUI.AddDropDownList("w180 x+10 yp-2 Choose" citeIdx, ["Off", "Page number (p. 412)", "PDF page label / Bates"])
 
     showBtnChk := SETGUI.AddCheckbox("xm y+14" (CFG.showButton ? " Checked" : ""))
     SETGUI.AddText("x+4 yp", "Show floating button").SetFont("cWhite")
@@ -1743,6 +1827,7 @@ ShowSettingsGui() {
         newApplyStyle := applyStyleChk.Value ? true : false
         newHeaderBold := boldChk.Value ? true : false
         newLinesBelow := HDR_ValidLines(linesDDL.Value - 1)
+        newPageCite := citeTokens[citeDDL.Value]
         newBeep := beepChk.Value ? true : false
         newSoundScheme := soundTokens[soundDDL.Value]
         newComboInsert := comboChk.Value ? true : false
@@ -1765,6 +1850,7 @@ ShowSettingsGui() {
         IniWrite(newApplyStyle ? "1" : "0", CFG.path, "Settings", "ApplyHeadingStyle")
         IniWrite(newHeaderBold ? "1" : "0", CFG.path, "Settings", "HeaderBold")
         IniWrite(newLinesBelow, CFG.path, "Settings", "LinesBelow")
+        IniWrite(newPageCite, CFG.path, "Settings", "PageCite")
         IniWrite(newBeep ? "1" : "0", CFG.path, "Settings", "Beep")
         IniWrite(newSoundScheme, CFG.path, "Settings", "SoundScheme")
         IniWrite(newComboInsert ? "1" : "0", CFG.path, "Settings", "ComboInsert")
@@ -1787,6 +1873,7 @@ ShowSettingsGui() {
         CFG.applyStyle := newApplyStyle
         CFG.headerBold := newHeaderBold
         CFG.linesBelow := newLinesBelow
+        CFG.pageCite := newPageCite
         CFG.beep := newBeep
         CFG.soundScheme := newSoundScheme
         CFG.comboInsert := newComboInsert
